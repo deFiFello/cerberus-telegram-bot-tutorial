@@ -1,0 +1,22 @@
+{
+  "name": "@cerberus/bot",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/bot.ts"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "telegraf": "^4.16.3",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.3",
+    "@types/node": "^24.3.0",
+    "@types/react": "^19.1.11",
+    "@types/react-dom": "^19.1.8",
+    "tsx": "^4.19.2",
+    "typescript": "^5.5.4"
+  }
+}

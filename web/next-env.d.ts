@@ -2,4 +2,4 @@
 /// <reference types="next/image-types/global" />
 
 // NOTE: This file should not be edited
-// It ensures Next.js types are picked up by the TS compiler
+// see https://nextjs.org/docs/app/building-your-application/configuring/typescript for more information.
