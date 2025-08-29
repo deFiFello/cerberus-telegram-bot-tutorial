@@ -1,189 +1,143 @@
-# 🐶 Cerberus: Non-Custodial Telegram Bot & Mini App for Solana
+# Cerberus — Non-Custodial Telegram Bot & Mini App for Solana
 
-Cerberus is an **open-source, non-custodial Telegram bot and Mini App** built on Solana using **Jupiter v6** and **Shield API**.  
-It provides a safer alternative to custodial bots by ensuring users **always retain control of their funds**.  
-The project serves as both a **public good tutorial for Solana developers** and a production-ready framework for non-custodial swaps.
-
----
-
-## 🚨 Why Cerberus Matters (Public Good)
-
-Existing Telegram trading bots on Solana (e.g. Trojan, BONKbot) have grown quickly, but most use **custodial architectures** where users must deposit funds into third-party wallets.  
-This model introduces major risks, highlighted by the **BONKbot exploit** where attackers stole more than $553,000 in SOL.  
-
-Cerberus is different:
-- **Non-Custodial**: users sign all transactions with their own wallet (e.g. Phantom).  
-- **Open Source**: code is available for other developers to learn from, fork, and extend.  
-- **Educational**: built as a full tutorial, showing how to integrate Solana dApps safely in Telegram and Mini Apps.  
-
-By lowering barriers for developers and reducing risks for retail users, Cerberus directly contributes to Solana’s public good mission.
+**Project type:** Open-source public good + developer tutorial  
+**Stack:** Solana, Jupiter v6, Shield API, Telegraf, Next.js, TypeScript  
+**Repo:** https://github.com/deFiFello/cerberus-telegram-bot-tutorial
 
 ---
 
-## 🛠 What Cerberus Is (Scope)
+## 1) Executive Summary
 
-Cerberus consists of three core components:
+Cerberus is a **non-custodial, open-source** Telegram bot and Mini App that enables safe token swaps on Solana via **Jupiter v6**, with optional **Shield API** safety checks.  
+Unlike custodial bots, users always sign with their own wallet. The codebase is designed as a **teaching resource** and a production-ready starter for builders.
 
-1. **API Proxy**  
-   - Express + TypeScript backend.  
-   - Secure proxy to Jupiter v6 Quote & Swap APIs and Shield API.  
-
-2. **Telegram Bot**  
-   - Built with Telegraf.  
-   - Provides `/swap` commands and connects to the Mini App for wallet signing.  
-
-3. **Next.js Mini App**  
-   - Frontend with wallet adapter.  
-   - Enables a seamless non-custodial flow: user requests swap → wallet opens → sign & confirm.  
-
-Together, these components form a blueprint for safe Solana trading in consumer apps.
+The project already has a **live API**, successful **mainnet swap**, and a public repo. Grant funds accelerate optimization, docs/video tutorial, and developer adoption.
 
 ---
 
-## ✅ Proof of Work
+## 2) Problem
 
-Cerberus is **live and tested on mainnet**:
-
-- **API deployed on Render**: [https://cerberus-telegram-bot-tutorial.onrender.com](https://cerberus-telegram-bot-tutorial.onrender.com)  
-- `/health` endpoint returns configured Jupiter bases  
-- `/order` successfully quotes swaps  
-- **BuildTx** confirmed with a valid serialized transaction payload  
-- **Mainnet swap executed successfully** (confirmed via Solana Explorer)  
-- **Public repository**: [github.com/deFiFello/cerberus-telegram-bot-tutorial](https://github.com/deFiFello/cerberus-telegram-bot-tutorial)  
-
-👉 This is the **sole official repository** for Cerberus.  
-
-Screenshots and transaction proofs are included in the repo as **appendix PDF (“Cerberus Proof of Work”)**.
+Most popular Telegram bots on Solana are **custodial**: users deposit funds to third-party wallets, creating theft/exploit risk and eroding trust.  
+At the same time, new builders lack a clear, modern reference for **non-custodial** Telegram/Mini-App patterns on Solana.
 
 ---
 
-## 📐 Technical Architecture
+## 3) Solution
 
-- **Node Proxy (API)**  
-  - Wraps Jupiter v6 Quote (`/quote`) and Swap (`/swap`) endpoints.  
-  - Adds optional Shield API checks for token safety.  
-  - Enforces non-custodial flow: transactions are built server-side but **always signed client-side**.  
+Cerberus provides:
+- A **Node proxy** that calls Jupiter v6 for quotes/swaps and checks tokens via Shield.
+- A **Telegram bot (Telegraf)** that issues commands and deep-links to the Mini App.
+- A **Next.js Mini App** that connects a wallet (Wallet Adapter) for **client-side signing**.
+- A complete, open-source **tutorial** so others can replicate and extend.
 
-- **Telegram Bot**  
-  - Uses Telegraf for command handling.  
-  - Calls API proxy for quotes.  
-  - Generates Mini App deep links for transaction approval.  
-
-- **Mini App (Web)**  
-  - Built with Next.js.  
-  - Integrates Solana wallet adapter for seamless signing.  
-  - Provides UI for swap parameters, confirmation, and error reporting.  
-
-This architecture is safe, modular, and easily extendable by other developers.
+**Key principles**
+- Non-custodial by default: server builds but **never signs** user transactions.
+- Safety-first: token checks (Shield), progressive validation, and whitelisting options.
+- Minimal friction UX with Mini App + wallet adapter.
 
 ---
 
-## 🔒 Safety Enhancements
+## 4) Architecture
 
-Cerberus builds user trust by combining non-custodial signing with safety layers:
-- **Shield API**: real-time token risk checks.  
-- **Progressive security**: stricter checks for larger trades.  
-- **Whitelist mode** (planned): allow swaps only on vetted tokens.  
-- **Fallback routing**: ensures continuity if Jupiter endpoints experience downtime.  
+**API (Express + TypeScript)**
+- Endpoints: `/health`, `/order` (quote), `/order?…&buildTx=true` (serialized swap), `/tokens`, `/shield`.
+- Proxies Jupiter v6; can add platform fees later.
+- Optional Shield checks before swap build.
 
----
+**Telegram Bot (Telegraf)**
+- Commands like `/start`, `/swap SOL USDC 0.1`.
+- Generates Mini App deep links to complete signing securely.
 
-## 🧪 Competitive Landscape
-
-| Bot       | Custodial | Open Source | Shield API | Public Good | Risk Profile |
-|-----------|-----------|-------------|------------|-------------|--------------|
-| **Cerberus** | ❌ Non-Custodial | ✅ Yes | ✅ Yes | ✅ Yes | Low |
-| Trojan    | ✅ Yes | ❌ No | ❌ No | ❌ No | High |
-| BONKbot   | ✅ Yes | ❌ No | ❌ No | ❌ No | High |
-| Photon    | Mixed | ❌ No | ❌ No | ❌ No | Medium |
-
-Cerberus is the only **open-source, non-custodial, safety-first** option available.
+**Mini App (Next.js)**
+- Wallet Adapter for Phantom/etc.
+- Presents quote, confirms, and requests signature from user wallet.
 
 ---
 
-## 📊 Why Only Solana?
+## 5) Proof of Work
 
-Cerberus is only possible on Solana because:
-- **Sub-second finality** enables real-time swap confirmations.  
-- **Parallel transaction processing (Sealevel runtime)** supports high-frequency trading.  
-- **Low fees** make micro-swaps feasible and attractive.  
-
-This combination makes Solana uniquely suited for consumer bots and Mini Apps.
-
----
-
-## 🗺 Roadmap & Milestones
-
-**Phase 1 – MVP (✅ Complete)**  
-- API proxy live  
-- Telegram bot skeleton running  
-- Mini App bootstrap completed  
-- Mainnet swap confirmed  
-
-**Phase 2 – Optimizations**  
-- Local caching of quotes for frequent pairs  
-- Parallel swap execution  
-- Pre-fetch Shield safety data  
-- Fee tiers + optional priority execution  
-
-**Phase 3 – Public Good Deliverable**  
-- Full open-source tutorial (docs + video walkthroughs)  
-- Example Mini App integrations  
-- Release **analytics starter kit** (basic on-chain trade history analysis)  
-
-**Phase 4 – Growth**  
-- AI-powered wallet insights (“diamond hand” vs “paper hand” classification)  
-- Predictive token risk scoring (real-time ML applied to Shield + market data)  
-- Personalized trading dashboards for advanced users  
-- Partnerships with Jupiter & Solana ecosystem projects  
-- Multi-region deployments for latency reduction  
+- Live API: https://cerberus-telegram-bot-tutorial.onrender.com  
+- `/health` OK; `/order` returns routed plans from Jupiter.  
+- Mainnet swap executed and confirmed.  
+- Public repo: https://github.com/deFiFello/cerberus-telegram-bot-tutorial  
+- Evidence:  
+  - PDF: [docs/proof/Cerberus-Proof-of-Work.pdf](docs/proof/Cerberus-Proof-of-Work.pdf)  
+  - Screenshots: [docs/proof/](docs/proof/)
 
 ---
 
-## 💰 Budget & Use of Funds
+## 6) Competitive Landscape
 
-Request: **$10,000 – $25,000** (solo builder, open-source deliverable)
+| Bot        | Custodial | Open Source | Safety Layer | Public Good |
+|------------|-----------|-------------|--------------|-------------|
+| **Cerberus** | ❌ No     | ✅ Yes      | ✅ Shield API | ✅ Yes       |
+| Trojan     | ✅ Yes     | ❌ No       | ❌           | ❌          |
+| BONKbot    | ✅ Yes     | ❌ No       | ❌           | ❌          |
+| Photon     | Mixed     | ❌ No       | ❌           | ❌          |
 
-Allocation:
-- Hosting (Render, RPC providers)  
-- Documentation & tutorial creation  
-- UX improvements (Mini App polish)  
-- Educational content (video + written guides)  
-- Future AI/analytics R&D (foundation for Phase 4)  
-
----
-
-## 🤖 AI & Analytics: A Vision for the Future
-
-Cerberus already uses Shield API for static token checks.  
-The next step is **AI-powered analytics** to make trading smarter and safer:
-
-- **Wallet Insights**: Analyze trading history to profile user behavior.  
-- **Predictive Risk Scoring**: Forecast token risk using real-time data.  
-- **Personalized Analytics**: Provide dashboards with data-driven trading suggestions.  
-
-These tools will be built **open-source first** (Phase 3 analytics framework) and extended in Phase 4 for growth.  
-This directly aligns with Solana Foundation and Superteam’s increasing focus on AI-powered projects.
+Cerberus is the only **open-source, non-custodial, safety-first** template aimed at developers.
 
 ---
 
-## 📜 License
+## 7) Why Solana
 
-Apache-2.0 — free for anyone to use, fork, and extend.
-
----
-
-## 🙌 Acknowledgements
-
-- [Jupiter Aggregator](https://jup.ag)  
-- [Solana Foundation](https://solana.org)  
-- [Telegram Bot API](https://core.telegram.org/bots/api)  
+- **Sub-second finality** for responsive UX.  
+- **Sealevel** parallel execution for throughput and low latency.  
+- **Low fees** enable micro-swaps and frequent transactions.  
+These properties make non-custodial Telegram flows practical for everyday users.
 
 ---
 
-## 🎯 Conclusion
+## 8) Roadmap & Milestones
 
-Cerberus is more than a trading bot. It is a **public good, an educational resource, and a blueprint** for safe Solana integrations.  
+**Phase 1 — MVP (✅ complete)**
+- API proxy, bot skeleton, Mini App bootstrap, mainnet swap.
 
-By funding Cerberus, **Superteam will directly support a high-impact project** that aligns with its mission:  
-empowering Solana builders, creating open-source public goods, and advancing community-driven innovation.
+**Phase 2 — Optimizations**
+- Local cache for hot pairs, parallel swaps, Shield prefetch.  
+- Fee tiers & optional priority execution.  
+- UX polish (favorites, templates, large-trade confirm).
+
+**Phase 3 — Public Good Deliverable**
+- Full tutorial site + video walkthroughs.  
+- Example integrations for Mini Apps.  
+- Publish an **analytics starter kit** (basic on-chain trade history tools).
+
+**Phase 4 — Growth**
+- AI-assisted wallet insights & predictive risk scoring.  
+- Partnerships with Jupiter/ecosystem projects.  
+- Multi-region deployments.
+
+---
+
+## 9) Budget & Use of Funds (Request: **$10k–$25k**)
+
+- Hosting/RPC & monitoring  
+- Documentation + tutorial production (written & video)  
+- UX improvements for Mini App  
+- Developer support & examples  
+- Seed work on analytics/AI modules
+
+Solo build initially; expandable if traction warrants.
+
+---
+
+## 10) Risks & Mitigations
+
+- **API changes / upstream downtime** → fallback endpoints, retries, health checks.  
+- **User error** → confirmations for large trades, whitelist mode, clearer warnings.  
+- **Security** → non-custodial by design; no private keys on server; minimal state.
+
+---
+
+## 11) License
+
+**Apache-2.0** — free to use, fork, and extend.
+
+---
+
+## 12) Contact & Links
+
+- Repo: https://github.com/deFiFello/cerberus-telegram-bot-tutorial  
+- Live API: https://cerberus-telegram-bot-tutorial.onrender.com  
+- Evidence: [docs/proof/](docs/proof/) & [docs/proof/Cerberus-Proof-of-Work.pdf](docs/proof/Cerberus-Proof-of-Work.pdf)
