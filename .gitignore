@@ -29,3 +29,8 @@ pnpm-debug.log*
 
 # Mac system files
 *.DS_Store
+
+# local artifacts
+*.b64
+swap.txt
+api/swap_tx.b64
