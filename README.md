@@ -18,9 +18,9 @@ The project serves both as a **public good tutorial** and a foundation for safe,
 /api # Node proxy (Express + TypeScript)
 /bot # Telegram bot commands (Telegraf)
 /web # Next.js Mini App (wallet connect + swap UI)
-/docs # Proof of Work (screenshots, PDF evidence)
+/docs # Proof of Work (screenshots, PDF evidence, whitepaper)
 
-yaml
+bash
 Copy code
 
 ---
@@ -36,10 +36,7 @@ Copy code
 ```bash
 git clone https://github.com/deFiFello/cerberus-telegram-bot-tutorial
 cd cerberus-telegram-bot-tutorial
-Each package has its own dependencies:
 
-bash
-Copy code
 cd api && npm install
 cd ../bot && npm install
 cd ../web && npm install
@@ -89,7 +86,7 @@ GET /order (buildTx) → add &buildTx=true&userPublicKey=<BASE58>
 
 GET /tokens → passthrough to Lite API
 
-GET /shield?mints=<mint1,mint2> → Shield safety data
+**GET /shield?mints=<mint1,mint2>` → Shield safety data
 
 🧪 Test Scripts
 Quote Test
@@ -122,17 +119,20 @@ npx tsx src/swap-and-send.ts \
   --out EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v \
   --amount 1000000 \
   --slip 50
-## ✅ Proof of Work
+✅ Proof of Work
+✅ API deployed to Render
 
-- ✅ API deployed to [Render](https://cerberus-telegram-bot-tutorial.onrender.com)
-- ✅ `/health` and `/order` live-tested
-- ✅ Mainnet swap executed successfully ([Explorer link](https://explorer.solana.com/tx/3xFg53X...))
-- ✅ Full repo structure: API, Bot, Web
-- ✅ Tutorial included in this README
+✅ /health and /order live-tested
 
-📄 [Full Proof of Work PDF](docs/proof/Cerberus-Proof-of-Work.pdf)  
-🖼️ [Supporting Screenshots](docs/proof/)
+✅ Mainnet swap executed successfully (Explorer proof)
 
+✅ Full repo structure: API, Bot, Web
+
+✅ Tutorial included in this README
+
+📄 Full Proof of Work PDF
+🖼️ Supporting Screenshots
+📑 Whitepaper
 
 🗺 Roadmap
 Phase 1 – MVP (✅ complete)
@@ -177,35 +177,13 @@ Solana Foundation
 
 Telegram Bot API
 
-Why Cerberus?
-Other bots (Trojan, Bonkbot) are custodial. Cerberus is non-custodial, open-source, and designed as a public good — a safer alternative for the Solana community.
+🔗 Live Demo
+Cerberus API is live and fully integrated with Jupiter v6.
 
-Live Demo & Proof
-Cerberus is live and fully integrated with Jupiter v6.
-API base: https://cerberus-telegram-bot-tutorial.onrender.com
+Base URL: https://cerberus-telegram-bot-tutorial.onrender.com
 
-Quick Smoke Tests
+Quick smoke test:
 
 bash
 Copy code
-# 1) Health
 curl -s https://cerberus-telegram-bot-tutorial.onrender.com/health | jq .
-
-# 2) Quote a SOL -> USDC swap
-IN=So11111111111111111111111111111111111111112
-OUT=EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v
-AMT=1000000  # 0.001 SOL
-SLIP=50
-curl -s "https://cerberus-telegram-bot-tutorial.onrender.com/order?inputMint=${IN}&outputMint=${OUT}&amount=${AMT}&slippageBps=${SLIP}" | jq .
-Appendix A — Proof of Work (Whitepaper)
-A1. API Health — /health returns ok: true + base URLs.
-
-A2. Successful Quote — /order returns routed plan, outAmount, AMM.
-
-A3. Telegram Bot — /start works, swap commands generate mini-app links.
-
-A4. Non-Custodial Transaction — mainnet swap confirmed on Solana Explorer.
-
-A5. Open-Source Repo — cerberus-telegram-bot-tutorial.
-
-A6. Screenshots/PDF — Proof of Work PDF
