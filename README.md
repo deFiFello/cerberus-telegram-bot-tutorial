@@ -125,9 +125,9 @@ npx tsx src/swap-and-send.ts \
 - ✅ Full repo structure: API, Bot, Web  
 - ✅ Tutorial included in this README  
 
-📄 [Full Proof of Work PDF](docs/proof/Cerberus-Proof-of-Work.pdf)  
+📄 [Full Proof of Work PDF](docs/Cerberus-Proof-of-Work.pdf)  
 🖼️ [Supporting Screenshots](docs/proof/)  
-📑 [Whitepaper](docs/proof/WHITEPAPER.md)  
+📑 [Whitepaper](docs/whitepaper.md)  
 
 ## 🗺 Roadmap
 
