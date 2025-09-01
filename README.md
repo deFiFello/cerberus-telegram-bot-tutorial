@@ -30,6 +30,26 @@ The project serves both as a **public good tutorial** and a foundation for safe,
 ---
 
 ## 🚀 Quick Start
+### Docker quickstart
+
+```bash
+docker compose up --build -d
+
+PORT=4000   # or 4001 if you remapped
+IN=So11111111111111111111111111111111111111112
+OUT=EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v
+AMT=1000000
+SLIP=50
+
+# MISS then HIT
+curl -i "http://localhost:$PORT/order?inputMint=$IN&outputMint=$OUT&amount=$AMT&slippageBps=$SLIP" | grep -i x-cache
+curl -i "http://localhost:$PORT/order?inputMint=$IN&outputMint=$OUT&amount=$AMT&slippageBps=$SLIP" | grep -i x-cache
+
+# metrics
+curl -s "http://localhost:$PORT/metrics" | jq .
+
+# stop stack
+docker compose down -v
 
 ### 1) Prerequisites
 - Node.js 18+ (20/22 recommended)  
