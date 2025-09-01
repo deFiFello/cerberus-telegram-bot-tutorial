@@ -1,3 +1,8 @@
+Status: API stable • Cache + Safety + Metrics live • Web UI minimal demo in progress • In grant review
+
+![API CI](https://github.com/deFiFello/cerberus-telegram-bot-tutorial/actions/workflows/api-ci.yml/badge.svg)
+
+
 # 🐶 Cerberus: Solana Telegram Bot & Mini App
 
 Cerberus is an **open-source, non-custodial Telegram bot and Mini App** for swaps on Solana, built with **Jupiter v6** and **Shield API**.  
