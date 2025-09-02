@@ -22,12 +22,12 @@ The project serves both as a **public good tutorial** and a foundation for safe,
 - [Metrics](#metrics)
 - [Tests](#tests)
 - [Scripts and examples](#scripts-and-examples)
-- [Proof of work](#proof-of-work)
-- [Appendix A: Whitepaper](#appendix-a-whitepaper)
-- [Roadmap](#roadmap)
-- [License](#license)
-- [Acknowledgements](#acknowledgements)
-- [Live demo](#live-demo)
+- [Proof of work](#-proof-of-work)
+- [Whitepaper](#-whitepaper)
+- [Roadmap](#%EF%B8%8F-roadmap)
+- [License](#-license)
+- [Acknowledgements](#-acknowledgements)
+- [Live demo](#-live-demo)
 
 ---
 
@@ -295,7 +295,7 @@ npx tsx src/swap-and-send.ts \
 
 ---
 
-## — Whitepaper
+## Whitepaper
 
 See the **[whitepaper](docs/whitepaper.md)**.
 
