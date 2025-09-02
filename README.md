@@ -287,21 +287,27 @@ npx tsx src/swap-and-send.ts \
 
 ---
 
-## Proof of work
-- API deployed on Render when link is online
-- `/health` and `/order` live tested
-- Mainnet swap executed
-- Repo includes API, Bot, Web, and tutorial content
+## ✅ Proof of Work
 
-**Evidence**
-- `docs/proof/Cerberus-Proof-of-Work.pdf`
-- `docs/proof/`
-- `docs/whitepaper.md`
+- [Cerberus Proof of Work (PDF)](docs/proof/Cerberus-Proof-of-Work.pdf)
+- [Screenshots](docs/proof/)
+- [Whitepaper](docs/whitepaper.md)
 
 ---
 
-## Appendix A: Whitepaper
-See `docs/whitepaper.md`.
+## — Whitepaper
+
+See the **[whitepaper](docs/whitepaper.md)**.
+
+---
+
+## 🔗 Live demo
+
+Base URL: <https://cerberus-telegram-bot-tutorial.onrender.com>
+
+**Smoke test**
+```bash
+curl -s https://cerberus-telegram-bot-tutorial.onrender.com/health | jq .
 
 ---
 
