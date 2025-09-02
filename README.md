@@ -308,34 +308,50 @@ Base URL: <https://cerberus-telegram-bot-tutorial.onrender.com>
 **Smoke test**
 ```bash
 curl -s https://cerberus-telegram-bot-tutorial.onrender.com/health | jq .
+```
 
 ---
 
-## Roadmap
-**Phase 1 - MVP**: API proxy, bot scaffold, mini app starter, mainnet swap  
-**Phase 2 - Optimizations**: cache polish, parallel swaps, Shield prefetch, fee tiers, priority fee, UX  
-**Phase 3 - Public good**: tutorial and video walkthroughs, sample integrations  
-**Phase 4 - Growth**: partnerships, institutional tier, referrals, multi-region deploys
+## 🗺️ Roadmap
 
-**Progress**
-- API stable
-- Redis MISS to HIT
-- Metrics and safety flags
-- Dockerized local stack
-- Web UI demo merge
-- Full tutorial (screens and video)
+### Phase 1 — MVP (✅ complete)
+- API proxy
+- Bot scaffold
+- Mini app starter
+- Mainnet swap
 
----
+### Phase 2 — Optimizations
+- Cache polish
+- Parallel swaps
+- Shield prefetch
+- Fee tiers
+- Priority fees
+- UX
 
-## License
+### Phase 3 — Public good
+- Full tutorial (screens + video)
+- Sample integrations
+
+### Phase 4 — Growth
+- Partnerships
+- Institutional tier
+- Referrals
+- Multi-region deploys
+
+## 📈 Progress
+- [x] API stable
+- [x] Redis MISS → HIT
+- [x] Metrics and safety flags
+- [x] Dockerized local stack
+- [x] Web UI demo merge
+- [x] Full tutorial (screens + video)
+
+## 📜 License
 Apache-2.0
 
+## 🙏 Acknowledgements
+- [Jupiter Aggregator](https://jup.ag)
+- [Solana Foundation](https://solana.org)
+- [Telegram Bot API](https://core.telegram.org/bots/api)
+
 ---
-
-## Acknowledgements
-Jupiter Aggregator • Solana Foundation • Telegram Bot API
-
----
-
-## Live demo
-Base URL: *(fill in your Render URL when live)*
