@@ -10,27 +10,24 @@ The project serves both as a **public good tutorial** and a foundation for safe,
 
 ---
 
-## 📑 Table of Contents
+## Table of Contents
+- [What you get](#what-you-get)
+- [Repo layout](#repo-layout)
+- [Quick start with Docker](#quick-start-with-docker)
+- [Local development](#local-development)
+- [Environment](#environment)
+- [API endpoints](#api-endpoints)
+- [Caching and safety](#caching-and-safety)
+- [Metrics](#metrics)
+- [Tests](#tests)
+- [Scripts and examples](#scripts-and-examples)
+- [Proof of Work](#proof-of-work)
+- [Appendix A — Whitepaper](#appendix-a--whitepaper)
+- [Roadmap](#roadmap)
+- [License](#license)
+- [Acknowledgements](#acknowledgements)
+- [Live demo](#live-demo)
 
-- [What you get](#-what-you-get)
-- [Repo layout](#-repo-layout)
-- [Quick start with Docker](#-quick-start-with-docker)
-- [Local development](#-local-development)
-- [Environment](#-environment)
-- [API endpoints](#-api-endpoints)
-- [Caching and safety](#-caching-and-safety)
-- [Metrics](#-metrics)
-- [Tests](#-tests)
-- [Scripts and examples](#-scripts-and-examples)
-- [Proof of Work](#-proof-of-work)
-- [Appendix A — Whitepaper](#-appendix-a--proof-of-work-whitepaper)
-- [Roadmap](#-roadmap)
-- [License](#-license)
-- [Acknowledgements](#-acknowledgements)
-- [Live demo](#-live-demo)
-
----
----
 
 ## ✨ What You Get
 
