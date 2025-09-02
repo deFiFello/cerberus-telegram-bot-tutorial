@@ -355,3 +355,15 @@ Apache-2.0
 - [Telegram Bot API](https://core.telegram.org/bots/api)
 
 ---
+## Live checks
+```bash
+BASE="https://cerberus-telegram-bot-tutorial.onrender.com"
+# health
+curl -s "$BASE/health" | jq .
+# quote
+IN=So11111111111111111111111111111111111111112
+OUT=EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v
+AMT=1000000
+curl -i "$BASE/order?inputMint=$IN&outputMint=$OUT&amount=$AMT&slippageBps=50"
+# metrics
+curl -s "$BASE/metrics" | jq .
