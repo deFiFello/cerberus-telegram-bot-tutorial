@@ -306,14 +306,14 @@ See the **[whitepaper](docs/whitepaper.md)**.
 ---
 
 ## Live demo
-```md
+
 ### Screens
 
 <p align="center">
-  <img src="media/screens/01-health.png" width="700" alt="Health JSON 200">
-  <img src="media/screens/02-order-headers.png" width="700" alt="Order headers 200 with x-cache">
-  <img src="media/screens/03-order-json.png" width="700" alt="Order JSON with route">
-  <img src="media/screens/04-metrics.png" width="700" alt="Metrics with requests and latency">
+  <img src="media/screens/01-health.png" width="700" alt="Health JSON 200" />
+  <img src="media/screens/02-order-headers.png" width="700" alt="Order headers 200 with x-cache" />
+  <img src="media/screens/03-order-json.png" width="700" alt="Order JSON with route" />
+  <img src="media/screens/04-metrics.png" width="700" alt="Metrics with requests and latency" />
 </p>
 
 
