@@ -23,11 +23,14 @@ The project serves both as a **public good tutorial** and a foundation for safe,
 - [Tests](#tests)
 - [Scripts and examples](#scripts-and-examples)
 - [Proof of work](#-proof-of-work)
-- [Whitepaper](#-whitepaper)
-- [Roadmap](#%EF%B8%8F-roadmap)
-- [License](#-license)
-- [Acknowledgements](#-acknowledgements)
-- [Live demo](#-live-demo)
+- [Whitepaper](#whitepaper)
+- [Roadmap](#roadmap)
+- [License](#license)
+- [Acknowledgements](#acknowledgements)
+- [Live checks](#live-checks)
+- [Bot quickstart](#bot-quickstart)
+- [Bot demo](#bot-demo)
+- [Live demo](#live-demo)
 
 ---
 
@@ -112,6 +115,7 @@ JUP_ULTRA_KEY=
 ### `bot/.env`
 ```env
 TELEGRAM_TOKEN=<your-telegram-bot-token>
+API_BASE=https://cerberus-telegram-bot-tutorial.onrender.com
 PUBLIC_WEB_URL=https://<your-render-deployment>.onrender.com
 ```
 
@@ -301,7 +305,17 @@ See the **[whitepaper](docs/whitepaper.md)**.
 
 ---
 
-## 🔗 Live demo
+## Live demo
+```md
+### Screens
+
+<p align="center">
+  <img src="media/screens/01-health.png" width="700" alt="Health JSON 200">
+  <img src="media/screens/02-order-headers.png" width="700" alt="Order headers 200 with x-cache">
+  <img src="media/screens/03-order-json.png" width="700" alt="Order JSON with route">
+  <img src="media/screens/04-metrics.png" width="700" alt="Metrics with requests and latency">
+</p>
+
 
 Base URL: <https://cerberus-telegram-bot-tutorial.onrender.com>
 
@@ -312,7 +326,7 @@ curl -s https://cerberus-telegram-bot-tutorial.onrender.com/health | jq .
 
 ---
 
-## 🗺️ Roadmap
+## Roadmap
 
 ### Phase 1 — MVP (✅ complete)
 - API proxy
@@ -346,24 +360,54 @@ curl -s https://cerberus-telegram-bot-tutorial.onrender.com/health | jq .
 - [x] Web UI demo merge
 - [x] Full tutorial (screens + video)
 
-## 📜 License
+## License
 Apache-2.0
 
-## 🙏 Acknowledgements
+## Acknowledgements
 - [Jupiter Aggregator](https://jup.ag)
 - [Solana Foundation](https://solana.org)
 - [Telegram Bot API](https://core.telegram.org/bots/api)
 
 ---
 ## Live checks
+Run these against the hosted API.
+
 ```bash
 BASE="https://cerberus-telegram-bot-tutorial.onrender.com"
+
 # health
 curl -s "$BASE/health" | jq .
-# quote
+
+# quote SOL -> USDC for 0.001 SOL
 IN=So11111111111111111111111111111111111111112
 OUT=EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v
 AMT=1000000
-curl -i "$BASE/order?inputMint=$IN&outputMint=$OUT&amount=$AMT&slippageBps=50"
+curl -s "$BASE/order?inputMint=$IN&outputMint=$OUT&amount=$AMT&slippageBps=50" | jq .
+
 # metrics
 curl -s "$BASE/metrics" | jq .
+```
+## Bot quickstart
+1. Create env
+```env
+cp bot/.env.example bot/.env
+TELEGRAM_TOKEN=<your BotFather token>
+API_BASE=https://cerberus-telegram-bot-tutorial.onrender.com
+# PUBLIC_WEB_URL=https://<your-render-app>.onrender.com
+```
+2. Run the bot
+```bash
+cd bot
+npm i
+npm run dev
+```
+3. Test in Telegram
+```text
+/ping
+/quote SOL USDC 0.001
+/selftest
+```
+
+## Bot demo
+![Telegram /quote](media/screens/05-telegram-quote.png)
+![Telegram /selftest](media/screens/06-telegram-selftest.png)
