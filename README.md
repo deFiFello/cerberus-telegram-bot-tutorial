@@ -1,3 +1,9 @@
+<p align="center">
+  <img src="web/public/brand/cerberus-logo-primary.png" height="72" alt="Cerberus" />
+</p>
+
+<p align="center"><b>Safety • Speed • Clarity</b></p>
+
 Status: API stable • Cache + Safety + Metrics live • Web UI demo in progress • In grant review
 
 ![API CI](https://github.com/deFiFello/cerberus-telegram-bot-tutorial/actions/workflows/api-ci.yml/badge.svg)
