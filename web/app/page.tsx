@@ -32,7 +32,7 @@ function BrandLogo({ size = 56 }: { size?: number }) {
   return (
     <div style={{ display: "inline-flex", alignItems: "center", gap: 12 }}>
       <Image
-        src="/brand/cerberus-logo-secondary.png"
+        src="/brand/cerberus-logo-primary.png"
         alt="Cerberus"
         width={size}
         height={size}
