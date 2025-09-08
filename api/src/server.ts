@@ -1,264 +1,192 @@
-/**
- * Cerberus API proxy (Node 18+/20+/22+ with global fetch)
- * Jupiter v6:
- *   - Quote: GET  https://quote-api.jup.ag/v6/quote
- *   - Swap : POST https://quote-api.jup.ag/v6/swap
- * NOTE: Never send x-api-key to quote-api endpoints.
- */
-import "dotenv/config";
-import express from "express";
-import cors from "cors";
-import morgan from "morgan";
-import crypto from "node:crypto";
-import rateLimit from "express-rate-limit";
+import 'dotenv/config';
+import express, { Request, Response } from 'express';
+import { TTLCache, quoteKey } from './lib/quoteCache.js'; // ESM: include .js
 
-// local libs (NodeNext needs .js extensions on relative imports)
-import { getRedis } from "./lib/redis.js";
-import pinoHttp from "pino-http";
-import { logger } from "./lib/logger.js";
-import { safetyGate } from "./lib/safety.js";
-import { met } from "./lib/metrics.js";
-
-
-// ---------- config ----------
+// ---------- Config ----------
 const PORT = Number(process.env.PORT || 4000);
-const QUOTE_BASE = (process.env.QUOTE_BASE || "https://quote-api.jup.ag").replace(/\/$/, "");
-const LITE_BASE  = (process.env.LITE_BASE  || "https://lite-api.jup.ag").replace(/\/$/, "");
-const ULTRA_BASE = (process.env.ULTRA_BASE || "https://api.jup.ag/ultra").replace(/\/$/, "");
-const ULTRA_KEY  = process.env.JUP_ULTRA_KEY || "";
+const QUOTE_BASE = process.env.QUOTE_BASE || 'https://quote-api.jup.ag';
+const LITE_BASE  = process.env.LITE_BASE  || 'https://lite-api.jup.ag';
+const ULTRA_BASE = process.env.ULTRA_BASE || 'https://api.jup.ag/ultra';
+const JUP_ULTRA_KEY = process.env.JUP_ULTRA_KEY || '';
 
-// ---------- app ----------
-const app = express();
-app.use(cors());
-app.use(express.json({ limit: "1mb" }));
-app.use(morgan("tiny"));
+// ---------- Cache ----------
+const quoteCache = new TTLCache<any>(500, 15_000); // 15s TTL, 500 entries
 
-// pino-http typing under NodeNext: cast once
-const pinoMw = pinoHttp as unknown as (opts?: any) => any;
-app.use(pinoMw({ logger, genReqId: () => crypto.randomUUID() }));
+// ---------- Metrics ----------
+const metrics = {
+  startedAt: Date.now(),
+  order: {
+    requests: 0,
+    cache: { hit: 0, miss: 0 },
+    latencyMs: [] as number[],
+  },
+};
+function percentile(arr: number[], p: number) {
+  if (!arr.length) return 0;
+  const s = [...arr].sort((a, b) => a - b);
+  const idx = Math.floor((p / 100) * (s.length - 1));
+  return s[idx];
+}
+function snapshot() {
+  const lat = metrics.order.latencyMs;
+  return {
+    uptimeSec: Math.floor((Date.now() - metrics.startedAt) / 1000),
+    order: {
+      requests: metrics.order.requests,
+      cache: metrics.order.cache,
+      latencyMs: { p50: percentile(lat, 50), p95: percentile(lat, 95) },
+    },
+  };
+}
 
-// Redis optional
-const redis = getRedis(process.env.REDIS_URL);
-logger.info({ redis: !!redis }, "redis_init");
+// ---------- App ----------
+export const app = express(); // export for tests
+app.set('trust proxy', true);
+app.use(express.json());
 
-// Basic rate limit for hot endpoints
-const perIpLimiter = rateLimit({
-  windowMs: 60_000,
-  limit: 60,
-  standardHeaders: true,
-  legacyHeaders: false,
-  handler: (_req, res) => res.status(429).json({ code: "RATE_LIMIT", msg: "Too many requests" })
+// ---------- Helpers ----------
+async function fetchJson<T = any>(
+  url: string,
+  init?: RequestInit
+): Promise<{ ok: boolean; status: number; data?: T; error?: any }> {
+  const r = await fetch(url, init as any);
+  if (!r.ok) {
+    let body: any = undefined;
+    try { body = await r.text(); } catch {}
+    return { ok: false, status: r.status, error: body || `HTTP ${r.status}` };
+  }
+  return { ok: true, status: r.status, data: (await r.json()) as T };
+}
+
+// ---------- Routes ----------
+app.get('/', (_req, res) => {
+  res.type('text/plain').send(
+    [
+      'Cerberus API',
+      '',
+      'GET /health',
+      'GET /order?inputMint&outputMint&amount&slippageBps[&buildTx=true&userPublicKey=...]',
+      'GET /metrics',
+      'GET /tokens',
+      'GET /shield?mints=<mint1,mint2>',
+    ].join('\n')
+  );
 });
 
-// ---------- helpers ----------
-function contentTypeIsJSON(h: Headers | HeadersInit): boolean {
-  const get = (h as Headers).get?.bind(h as Headers);
-  const val = get ? get("content-type") : (h as Record<string, string>)["content-type"];
-  return (val || "").toLowerCase().includes("application/json");
-}
-
-async function forwardJSON(res: express.Response, r: Response) {
-  res.status(r.status);
-  r.headers.forEach((v, k) => {
-    if (["cache-control", "etag", "content-type"].includes(k.toLowerCase())) res.setHeader(k, v);
-  });
-  if (contentTypeIsJSON(r.headers)) {
-    const j = await r.json().catch(() => null);
-    res.json(j ?? { ok: false, status: r.status });
-  } else {
-    const t = await r.text().catch(() => "");
-    res.json({ ok: r.ok, status: r.status, body: t });
-  }
-}
-
-function badRequest(res: express.Response, msg: string) {
-  res.status(400).json({ code: "BAD_REQUEST", msg });
-}
-
-function requireParamStr(res: express.Response, obj: any, key: string): string | undefined {
-  const v = obj?.[key];
-  if (typeof v === "string" && v.trim()) return v.trim();
-  badRequest(res, `Param '${key}' required`);
-  return undefined;
-}
-
-// ---------- Jupiter v6 clients ----------
-async function jupQuote(params: URLSearchParams) {
-  const url = `${QUOTE_BASE}/v6/quote?${params.toString()}`;
-  const r = await fetch(url, { headers: { accept: "application/json" } });
-  if (!r.ok) {
-    const body = await r.text().catch(() => "");
-    throw new Error(`Quote failed: ${r.status} ${body}`);
-  }
-  return r.json();
-}
-
-async function jupBuildSwap(quoteResponse: any, userPublicKey: string, slippageBps: number) {
-  const url = `${QUOTE_BASE}/v6/swap`;
-  const body = {
-    quoteResponse,
-    userPublicKey,
-    wrapAndUnwrapSol: true,
-    slippageBps,
-    asLegacyTransaction: false,
-    prioritizationFeeLamports: 0
-  };
-  const r = await fetch(url, {
-    method: "POST",
-    headers: { "content-type": "application/json", accept: "application/json" },
-    body: JSON.stringify(body)
-  });
-  if (!r.ok) {
-    const t = await r.text().catch(() => "");
-    throw new Error(`Swap build failed: ${r.status} ${t}`);
-  }
-  return r.json();
-}
-
-// ---------- routes ----------
-app.get("/health", (_req, res) => {
+app.get('/health', (_req, res) => {
   res.json({
     ok: true,
-    quote: QUOTE_BASE,
-    lite: LITE_BASE,
-    ultra: ULTRA_BASE,
-    ultraKey: Boolean(ULTRA_KEY),
-    redis: Boolean(redis)
+    quoteBase: QUOTE_BASE,
+    liteBase: LITE_BASE,
+    ultraBase: ULTRA_BASE,
+    cache: { enabled: true, kind: 'ttl-inproc', ttlMs: 15_000, max: 500 },
+    time: new Date().toISOString(),
   });
 });
 
-// Metrics snapshot
-app.get("/metrics", (_req, res) => {
-  res.json(met.snapshot());
+app.get('/metrics', (_req, res) => {
+  res.json(snapshot());
 });
 
-/**
- * /order
- * Required: inputMint, outputMint, amount, slippageBps
- * Optional: buildTx=true, userPublicKey (required if buildTx=true)
- */
-app.get("/order", perIpLimiter, async (req, res) => {
-  try {
-    const inputMint   = requireParamStr(res, req.query, "inputMint");    if (!inputMint) return;
-    const outputMint  = requireParamStr(res, req.query, "outputMint");   if (!outputMint) return;
-    const amount      = requireParamStr(res, req.query, "amount");       if (!amount) return;
-    const slippageStr = requireParamStr(res, req.query, "slippageBps");  if (!slippageStr) return;
+app.get('/tokens', async (_req, res) => {
+  const url = `${LITE_BASE}/tokens`;
+  const { ok, status, data, error } = await fetchJson(url);
+  if (!ok) return res.status(status).json({ ok: false, error });
+  res.json(data);
+});
 
-    const slippageBps = Number(slippageStr);
-    if (!Number.isFinite(slippageBps) || slippageBps < 0) return badRequest(res, "slippageBps must be non-negative");
+app.get('/shield', async (req, res) => {
+  const mints = String(req.query.mints || '').trim();
+  const shieldBase = process.env.SHIELD_BASE; // optional
+  if (!mints) return res.status(400).json({ ok: false, error: 'missing mints' });
+  if (!shieldBase) return res.status(501).json({ ok: false, error: 'SHIELD_BASE not configured' });
 
-    const buildTx = String(req.query.buildTx ?? "").toLowerCase() === "true";
-    const userPublicKey = String(req.query.userPublicKey ?? "").trim();
+  const url = `${shieldBase}?mints=${encodeURIComponent(mints)}`;
+  const { ok, status, data, error } = await fetchJson(url);
+  if (!ok) return res.status(status).json({ ok: false, error });
+  res.json(data);
+});
 
-    req.log?.info?.({ route: "order", buildTx, inputMint, outputMint, amount, slippageBps, hasUserKey: !!userPublicKey }, "order_request");
+app.get('/order', async (req: Request, res: Response) => {
+  metrics.order.requests++;
+  const t0 = Date.now();
 
-    // metrics start
-    met.orderRequest();
-    const t0 = Date.now();
+  const inputMint     = String(req.query.inputMint || '');
+  const outputMint    = String(req.query.outputMint || '');
+  const amount        = String(req.query.amount || '');
+  const slippageBps   = String(req.query.slippageBps || '');
+  const buildTx       = String(req.query.buildTx || '') === 'true';
+  const userPublicKey = String(req.query.userPublicKey || '');
 
-    // safety gate
-    const gate = await safetyGate({ inputMint, outputMint, liteBase: LITE_BASE, redis });
-    if (!gate.ok) {
-      met.safetyBlock();
-      req.log?.warn?.({ route: "order", code: gate.code }, "safety_gate_block");
-      return res.status(400).json({ code: gate.code, msg: gate.msg });
-    }
-
-    // buildTx path
-    if (buildTx) {
-      if (!userPublicKey) return badRequest(res, "Param 'userPublicKey' required when buildTx=true");
-      const qs = new URLSearchParams({ inputMint, outputMint, amount, slippageBps: String(slippageBps) });
-      const quoteResponse = await jupQuote(qs);
-      const swapResponse = await jupBuildSwap(quoteResponse, userPublicKey, slippageBps);
-      req.log?.info?.({ route: "order", buildTx: true }, "order_response");
-      // count as a MISS for latency accounting since we hit upstream
-      met.cacheMiss();
-      met.observe(Date.now() - t0);
-      return res.json(swapResponse);
-    }
-
-    // quote with 8s cache
-    const cacheKey = `ord:${inputMint}:${outputMint}:${amount}:${slippageBps}`;
-    if (redis) {
-      const cached = await redis.get(cacheKey);
-      if (cached) {
-        res.setHeader("x-cache", "HIT");
-        met.cacheHit();
-        met.observe(Date.now() - t0);
-        req.log?.info?.({ route: "order", cached: true }, "order_response");
-        return res.json(JSON.parse(cached));
-      }
-    }
-
-    const qs = new URLSearchParams({ inputMint, outputMint, amount, slippageBps: String(slippageBps) });
-    const quoteResponse = await jupQuote(qs);
-
-    if (redis) await redis.set(cacheKey, JSON.stringify(quoteResponse), "EX", 8);
-    res.setHeader("x-cache", "MISS");
-    met.cacheMiss();
-    met.observe(Date.now() - t0);
-    req.log?.info?.({ route: "order", cached: false }, "order_response");
-    return res.json(quoteResponse);
-  } catch (err: any) {
-    const msg = err?.message || String(err);
-    met.upstreamFail();
-    req.log?.error?.({ err: msg }, "order_unhandled");
-    return res.status(502).json({ code: "UPSTREAM_ERROR", msg });
+  if (!inputMint || !outputMint || !amount || !slippageBps) {
+    return res.status(400).json({ ok: false, error: 'missing required params: inputMint, outputMint, amount, slippageBps' });
   }
-});
-
-/** Optional passthroughs for docs */
-app.get("/tokens", perIpLimiter, async (_req, res) => {
-  try {
-    const r = await fetch(`${LITE_BASE}/tokens`);
-    return forwardJSON(res, r);
-  } catch (e: any) {
-    return res.status(502).json({ code: "UPSTREAM_ERROR", msg: e?.message || "Upstream error" });
+  if (buildTx && !userPublicKey) {
+    return res.status(400).json({ ok: false, error: 'buildTx=true requires userPublicKey' });
   }
-});
 
-app.get("/shield", perIpLimiter, async (req, res) => {
-  const mints = requireParamStr(res, req.query, "mints"); if (!mints) return;
-  try {
-    const r = await fetch(`${LITE_BASE}/shield?${new URLSearchParams({ mints })}`);
-    return forwardJSON(res, r);
-  } catch (e: any) {
-    return res.status(502).json({ code: "UPSTREAM_ERROR", msg: e?.message || "Upstream error" });
+  const key = quoteKey({ inputMint, outputMint, amount, slippageBps });
+
+  // Cache first
+  const cached = quoteCache.get(key);
+  if (cached) {
+    metrics.order.cache.hit++;
+    metrics.order.latencyMs.push(Date.now() - t0);
+    res.setHeader('x-cache', 'HIT');
+    return res.json(cached);
   }
+
+  // Upstream quote
+  const qs = new URLSearchParams({
+    inputMint,
+    outputMint,
+    amount,
+    slippageBps,
+  });
+  const quoteUrl = `${QUOTE_BASE}/v6/quote?${qs.toString()}`;
+  const quoteResp = await fetchJson<any>(quoteUrl);
+  if (!quoteResp.ok) {
+    metrics.order.latencyMs.push(Date.now() - t0);
+    res.setHeader('x-cache', 'MISS');
+    return res.status(quoteResp.status).json({ ok: false, error: quoteResp.error });
+  }
+
+  let payload: any = quoteResp.data;
+
+  if (buildTx) {
+    const swapUrl = `${QUOTE_BASE}/v6/swap`;
+    const swapBody = {
+      quoteResponse: payload,
+      userPublicKey,
+      wrapAndUnwrapSol: true,
+      dynamicSlippage: false,
+      prioritizationFeeLamports: undefined,
+    };
+    const swapResp = await fetchJson<any>(swapUrl, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(swapBody),
+    });
+    if (!swapResp.ok) {
+      metrics.order.latencyMs.push(Date.now() - t0);
+      res.setHeader('x-cache', 'MISS');
+      return res.status(swapResp.status).json({ ok: false, error: swapResp.error });
+    }
+    payload = { ...payload, swapTransaction: swapResp.data?.swapTransaction };
+  }
+
+  // Store & return
+  quoteCache.set(key, payload);
+  metrics.order.cache.miss++;
+  metrics.order.latencyMs.push(Date.now() - t0);
+  res.setHeader('x-cache', 'MISS');
+  return res.json(payload);
 });
 
-// ---------- landing ----------
-app.get("/", (_req, res) => {
-  res.type("html").send(`<!doctype html><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Cerberus API</title>
-  <style>body{font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Helvetica,Arial,sans-serif;margin:40px;color:#0f172a;background:#f8fafc}.card{max-width:860px;background:#fff;border:1px solid #e2e8f0;border-radius:14px;box-shadow:0 6px 18px rgba(15,23,42,.06);padding:28px}h1{margin:0 0 12px;font-size:28px}code{background:#0f172a;color:#e2e8f0;padding:2px 6px;border-radius:6px}a{color:#2563eb;text-decoration:none}a:hover{text-decoration:underline}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}.foot{margin-top:16px;color:#475569;font-size:13px}</style>
-  <div class="card">
-  <h1>🐶 Cerberus API</h1>
-  <p>Non-custodial swaps via <b>Jupiter v6</b>. Educational use only.</p>
-  <ul class="mono">
-    <li><a href="/health">GET /health</a></li>
-    <li><a href="/order?inputMint=So11111111111111111111111111111111111111112&outputMint=EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v&amount=1000000&slippageBps=50">GET /order (quote)</a></li>
-    <li><code>/order?...&buildTx=true&userPublicKey=&lt;BASE58&gt;</code> (build swap)</li>
-    <li><a href="/tokens">GET /tokens</a></li>
-    <li><a href="/shield?mints=So11111111111111111111111111111111111111112,EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v">GET /shield</a></li>
-  </ul>
-  </div>`);
-});
-
-// ---------- fallback ----------
-app.use((_req, res) => res.status(404).json({ error: "Route not found" }));
-
-// ---------- start ----------
-if (process.env.NODE_ENV !== "test") {
+// ---------- Start server (skip in tests) ----------
+if (process.env.NODE_ENV !== 'test') {
   app.listen(PORT, () => {
-    logger.info({ port: PORT }, "api_up");
+    // eslint-disable-next-line no-console
     console.log(`Cerberus API listening on :${PORT}`);
-    console.log(`Quote base: ${QUOTE_BASE}`);
-    console.log(`Lite base : ${LITE_BASE}`);
-    console.log(`Ultra base: ${ULTRA_BASE}`);
-    console.log(`Ultra key present: ${Boolean(ULTRA_KEY)}`);
   });
 }
-
-// For tests
-export { app };
