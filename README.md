@@ -1,4 +1,5 @@
 <p align="center">
+![Smoke](https://github.com/deFiFello/cerberus-telegram-bot-tutorial/actions/workflows/smoke.yml/badge.svg)
   <img src="web/public/brand/cerberus-logo-primary.png" height="72" alt="Cerberus" />
 </p>
 
