@@ -1,4 +1,5 @@
 <p align="center">
+![Smoke](https://github.com/deFiFello/cerberus-telegram-bot-tutorial/actions/workflows/smoke.yml/badge.svg)
   <img src="web/public/brand/cerberus-logo-primary.png" height="72" alt="Cerberus" />
 </p>
 
@@ -417,3 +418,23 @@ npm run dev
 ## Bot demo
 ![Telegram /quote](media/screens/05-telegram-quote.png)
 ![Telegram /selftest](media/screens/06-telegram-selftest.png)
+
+### Headers quick check
+
+Use this to show `x-cache` MISS then HIT on the hosted API.
+
+```bash
+BASE="https://cerberus-telegram-bot-tutorial.onrender.com"
+
+IN=So11111111111111111111111111111111111111112
+OUT=EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v
+AMT=1000000
+
+# first call should MISS, second should HIT
+for i in 1 2; do
+  curl -i "$BASE/order?inputMint=$IN&outputMint=$OUT&amount=$AMT&slippageBps=50" \
+  | awk 'BEGIN{IGNORECASE=1}/^HTTP\/|^content-type:|^x-cache:/{print}'
+  echo
+done
+
+‘‘‘

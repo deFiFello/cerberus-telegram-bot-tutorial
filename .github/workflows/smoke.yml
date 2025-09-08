@@ -1,0 +1,43 @@
+name: smoke
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+  schedule:
+    - cron: "0 */6 * * *"
+
+env:
+  BASE: https://cerberus-telegram-bot-tutorial.onrender.com
+  IN: So11111111111111111111111111111111111111112
+  OUT: EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v
+  AMT: "1000000"
+  SLIP: "50"
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Health
+        run: |
+          set -euo pipefail
+          curl -s "$BASE/health" | jq -e '.ok == true' >/dev/null
+
+      - name: Order (expect JSON)
+        run: |
+          set -euo pipefail
+          curl -s "$BASE/order?inputMint=$IN&outputMint=$OUT&amount=$AMT&slippageBps=$SLIP" \
+          | jq -e '.inAmount and .outAmount' >/dev/null
+
+      - name: Metrics
+        run: |
+          set -euo pipefail
+          curl -s "$BASE/metrics" | jq -e '.uptimeSec >= 0' >/dev/null
