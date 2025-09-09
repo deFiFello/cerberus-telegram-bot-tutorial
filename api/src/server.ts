@@ -9,6 +9,14 @@ const LITE_BASE  = process.env.LITE_BASE  || 'https://lite-api.jup.ag';
 const ULTRA_BASE = process.env.ULTRA_BASE || 'https://api.jup.ag/ultra';
 const JUP_ULTRA_KEY = process.env.JUP_ULTRA_KEY || '';
 
+// Denylist for demo safety gate
+const DENY_MINTS = new Set(
+  (process.env.DENY_MINTS || '')
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean)
+);
+
 // ---------- Cache ----------
 const quoteCache = new TTLCache<any>(500, 15_000); // 15s TTL, 500 entries
 
@@ -17,6 +25,7 @@ const metrics = {
   startedAt: Date.now(),
   order: {
     requests: 0,
+    safetyBlocks: 0,
     cache: { hit: 0, miss: 0 },
     latencyMs: [] as number[],
   },
@@ -29,12 +38,18 @@ function percentile(arr: number[], p: number) {
 }
 function snapshot() {
   const lat = metrics.order.latencyMs;
+  const hit = metrics.order.cache.hit;
+  const miss = metrics.order.cache.miss;
+  const total = hit + miss;
+  const hitRate = total ? +(hit * 100 / total).toFixed(1) : 0;
+
   return {
     uptimeSec: Math.floor((Date.now() - metrics.startedAt) / 1000),
     order: {
       requests: metrics.order.requests,
-      cache: metrics.order.cache,
-      latencyMs: { p50: percentile(lat, 50), p95: percentile(lat, 95) },
+      cache: { hit, miss, hitRate },
+      latency: { p50: percentile(lat, 50), p95: percentile(lat, 95) },
+      safetyBlocks: metrics.order.safetyBlocks
     },
   };
 }
@@ -125,6 +140,16 @@ app.get('/order', async (req: Request, res: Response) => {
     return res.status(400).json({ ok: false, error: 'buildTx=true requires userPublicKey' });
   }
 
+  // Safety gate (demo denylist)
+  if (DENY_MINTS.has(inputMint) || DENY_MINTS.has(outputMint)) {
+    metrics.order.safetyBlocks++;
+    return res.status(403).json({
+      error: 'blocked_by_safety_gate',
+      reason: 'denylist',
+      mints: { inputMint, outputMint }
+    });
+  }
+
   const key = quoteKey({ inputMint, outputMint, amount, slippageBps });
 
   // Cache first
@@ -137,12 +162,7 @@ app.get('/order', async (req: Request, res: Response) => {
   }
 
   // Upstream quote
-  const qs = new URLSearchParams({
-    inputMint,
-    outputMint,
-    amount,
-    slippageBps,
-  });
+  const qs = new URLSearchParams({ inputMint, outputMint, amount, slippageBps });
   const quoteUrl = `${QUOTE_BASE}/v6/quote?${qs.toString()}`;
   const quoteResp = await fetchJson<any>(quoteUrl);
   if (!quoteResp.ok) {
@@ -186,7 +206,6 @@ app.get('/order', async (req: Request, res: Response) => {
 // ---------- Start server (skip in tests) ----------
 if (process.env.NODE_ENV !== 'test') {
   app.listen(PORT, () => {
-    // eslint-disable-next-line no-console
     console.log(`Cerberus API listening on :${PORT}`);
   });
 }
