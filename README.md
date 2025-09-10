@@ -1,13 +1,23 @@
+<!-- Badges -->
 <p align="center">
-![Smoke](https://github.com/deFiFello/cerberus-telegram-bot-tutorial/actions/workflows/smoke.yml/badge.svg)
-  <img src="web/public/brand/cerberus-logo-primary.png" height="72" alt="Cerberus" />
+  <a href="https://github.com/deFiFello/cerberus-telegram-bot-tutorial/actions/workflows/api-ci.yml">
+    <img alt="API CI" src="https://github.com/deFiFello/cerberus-telegram-bot-tutorial/actions/workflows/api-ci.yml/badge.svg">
+  </a>
+  <a href="https://github.com/deFiFello/cerberus-telegram-bot-tutorial/actions/workflows/smoke.yml">
+    <img alt="Smoke" src="https://github.com/deFiFello/cerberus-telegram-bot-tutorial/actions/workflows/smoke.yml/badge.svg">
+  </a>
+</p>
+
+<!-- Logo -->
+<p align="center">
+  <img src="web/public/brand/cerberus-logo-primary.png" height="72" alt="Cerberus">
 </p>
 
 <p align="center"><b>Safety • Speed • Clarity</b></p>
 
-Status: API stable • Cache + Safety + Metrics live • Web UI demo in progress • In grant review
-
-![API CI](https://github.com/deFiFello/cerberus-telegram-bot-tutorial/actions/workflows/api-ci.yml/badge.svg)
+<p align="center">
+  Status: API stable • Cache + Safety + Metrics live • Web UI demo in progress • In grant review
+</p>
 
 # Cerberus: Solana Telegram Bot & Mini App
 
@@ -414,6 +424,13 @@ npm run dev
 /quote SOL USDC 0.001
 /selftest
 ```
+
+### Commands
+
+- `/ping` — quick latency check.
+- `/quote <IN> <OUT> <AMOUNT>` — eg: `/quote SOL USDC 0.001`.
+- `/selftest` — verifies API base + `/health` + `/order` + `/metrics`, shows route hops & outAmount.
+- `/status` — shows uptime, request count, cache hit/miss %, latency p50/p95, safety blocks.
 
 ## Bot demo
 ![Telegram /quote](media/screens/05-telegram-quote.png)
