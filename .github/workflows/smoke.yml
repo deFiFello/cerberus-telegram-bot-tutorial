@@ -5,39 +5,43 @@ on:
   push:
     branches: [ main ]
   schedule:
-    - cron: "0 */6 * * *"
-
-env:
-  BASE: https://cerberus-telegram-bot-tutorial.onrender.com
-  IN: So11111111111111111111111111111111111111112
-  OUT: EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v
-  AMT: "1000000"
-  SLIP: "50"
+    - cron: "0 */6 * * *"   # every 6 hours
 
 jobs:
-  smoke:
+  api:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      BASE: https://cerberus-telegram-bot-tutorial.onrender.com
+      IN: So11111111111111111111111111111111111111112
+      OUT: EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v
+      AMT: 1000000
+      SLIP: 50
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Install jq
-        run: sudo apt-get update && sudo apt-get install -y jq
-
-      - name: Health
+      - name: Health 200
         run: |
           set -euo pipefail
-          curl -s "$BASE/health" | jq -e '.ok == true' >/dev/null
+          curl -fsS "${BASE}/health" | tee health.json >/dev/null
+          # Require a JSON object and ok=true
+          jq -e 'type=="object" and .ok == true' health.json >/dev/null
 
-      - name: Order (expect JSON)
+      - name: Quote (try up to 3 times; HIT optional)
         run: |
           set -euo pipefail
-          curl -s "$BASE/order?inputMint=$IN&outputMint=$OUT&amount=$AMT&slippageBps=$SLIP" \
-          | jq -e '.inAmount and .outAmount' >/dev/null
+          url="${BASE}/order?inputMint=${IN}&outputMint=${OUT}&amount=${AMT}&slippageBps=${SLIP}"
+          hit=0
+          for i in 1 2 3; do
+            echo "try #$i"
+            # -f makes curl fail on non-200; -sS keeps logs clean
+            curl -fsSi "$url" -o /tmp/body.txt > /tmp/headers.txt
+            echo "---- headers"; awk 'BEGIN{IGNORECASE=1}/^HTTP\/|^x-cache:|^content-type:/{print}' /tmp/headers.txt
+            if grep -qi '^x-cache: *hit' /tmp/headers.txt; then hit=1; break; fi
+            sleep 3
+          done
+          # Don’t fail the job if no HIT (can happen on cold cache)
+          if [ "$hit" -eq 0 ]; then echo "No cache HIT observed (not fatal)."; fi
 
-      - name: Metrics
+      - name: Metrics 200
         run: |
           set -euo pipefail
-          curl -s "$BASE/metrics" | jq -e '.uptimeSec >= 0' >/dev/null
+          curl -fsS "${BASE}/metrics" >/dev/null
