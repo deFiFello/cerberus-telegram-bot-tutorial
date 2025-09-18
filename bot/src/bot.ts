@@ -51,19 +51,67 @@ function formatRoute(info: any) {
   }
 }
 
+// --- resilient API client ---------------------------------------------
+const sleep = (n: number) => new Promise((r) => setTimeout(r, n));
+
+/** Fetch with retries for 429/5xx; returns the Response */
+async function apiFetch(
+  path: string,
+  qs: Record<string, string | number> = {},
+  { retries = 4 }: { retries?: number } = {},
+): Promise<Response> {
+  const url = new URL(path, API_BASE);
+  Object.entries(qs).forEach(([k, v]) => url.searchParams.set(k, String(v)));
+
+  let attempt = 0;
+  // attempts: 0,1,2,3,4 => backoffs 0s,1s,2s,4s,8s
+  while (true) {
+    const res = await fetch(url.toString(), {
+      headers: { accept: 'application/json' } as any,
+    });
+
+    if (res.ok) return res;
+
+    if (![429, 500, 502, 503, 504].includes(res.status) || attempt >= retries) {
+      // bubble up non-retryable or exhausted
+      return res;
+    }
+    await sleep(1000 * 2 ** attempt);
+    attempt++;
+  }
+}
+
+/** GET JSON with retries; throws if final response not ok */
+async function apiGet<T>(
+  path: string,
+  qs: Record<string, string | number> = {},
+  opts?: { retries?: number },
+): Promise<T> {
+  const res = await apiFetch(path, qs, opts);
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(
+      `API ${res.status} ${res.statusText} • ${path} • ${text.slice(0, 200)}`,
+    );
+  }
+  return (await res.json()) as T;
+}
+
 // --- basic handlers ---------------------------------------------------
 bot.start((ctx) => ctx.reply('Cerberus online'));
-bot.help((ctx) =>
-  ctx.reply(
-    [
-      'Commands:',
-      '/ping',
-      '/quote SOL USDC 0.001',
-      '/selftest',
-      '/status',
-    ].join('\n'),
-  ),
-);
+
+bot.help(async (ctx) => {
+  const lines = [
+    '*Cerberus — Commands*',
+    '• `/ping` – latency check',
+    '• `/quote <IN> <OUT> <AMOUNT>` – e.g. `/quote SOL USDC 0.001`',
+    '• `/selftest` – verify API base, health, order, metrics',
+    '• `/status` – uptime, requests, cache hit/miss, latency p50/p95',
+    '',
+    '_Non-custodial: you always sign in your wallet._',
+  ];
+  await ctx.reply(lines.join('\n'), { parse_mode: 'Markdown' });
+});
 
 // /ping
 bot.command('ping', async (ctx) => {
@@ -80,14 +128,15 @@ bot.command('quote', async (ctx) => {
 
     const inMint = inSym.toUpperCase() === 'SOL' ? MINT_SOL : inSym;
     const outMint = outSym.toUpperCase() === 'USDC' ? MINT_USDC : outSym;
-
     const amount = toBaseUnits(amtTxt, inMint);
 
-    const url = `${API_BASE}/order?inputMint=${inMint}&outputMint=${outMint}&amount=${amount}&slippageBps=50`;
-
     const t0 = ms();
-    const res = await fetch(encodeURI(url));
-    const info: any = await res.json();
+    const info: any = await apiGet('/order', {
+      inputMint: inMint,
+      outputMint: outMint,
+      amount,
+      slippageBps: 50,
+    });
     const dt = elapsed(t0);
 
     const outAmount = info?.outAmount ?? '0';
@@ -119,23 +168,26 @@ bot.command('selftest', async (ctx) => {
 
     // health
     let t0 = ms();
-    const h = await fetch(`${API_BASE}/health`);
+    const hRes = await apiFetch('/health');
     const hDt = elapsed(t0);
-    checks.push(`✅ health ${h.status} in ${hDt}ms`);
+    checks.push(`✅ health ${hRes.status} in ${hDt}ms`);
 
-    // order
-    const url = `${API_BASE}/order?inputMint=${MINT_SOL}&outputMint=${MINT_USDC}&amount=1000000&slippageBps=50`;
+    // order (SOL->USDC 0.001)
     t0 = ms();
-    const oRes = await fetch(url);
+    const orderJson: any = await apiGet('/order', {
+      inputMint: MINT_SOL,
+      outputMint: MINT_USDC,
+      amount: 1_000_000,
+      slippageBps: 50,
+    });
     const oDt = elapsed(t0);
-    const orderJson: any = await oRes.json();
-    checks.push(`✅ order ${oRes.status} in ${oDt}ms`);
+    checks.push(`✅ order 200 in ${oDt}ms`);
 
     // metrics
     t0 = ms();
-    const mRes = await fetch(`${API_BASE}/metrics`);
+    const mRes = await apiFetch('/metrics');
     const mDt = elapsed(t0);
-    const metrics: any = await mRes.json();
+    const metrics: any = await mRes.json().catch(() => ({}));
     checks.push(`✅ metrics ${mRes.status} in ${mDt}ms`);
 
     const { hops, labelStr } = formatRoute(orderJson);
@@ -161,8 +213,7 @@ bot.command('selftest', async (ctx) => {
 // /status – summarized metrics (base, cache hit rate, latency p50/p95, etc.)
 bot.command('status', async (ctx) => {
   try {
-    const r = await fetch(`${API_BASE}/metrics`);
-    const m: any = await r.json();
+    const m: any = await apiGet('/metrics');
 
     const hit = m?.order?.cache?.hit ?? 0;
     const miss = m?.order?.cache?.miss ?? 0;
@@ -216,6 +267,16 @@ process.on('uncaughtException', (e) => {
 // main
 async function main() {
   try {
+    // Set Telegram command list (visible in the client UI)
+    await bot.telegram.setMyCommands([
+      { command: 'ping',     description: 'Latency check' },
+      { command: 'quote',    description: 'Swap quote: /quote IN OUT AMOUNT (e.g. /quote SOL USDC 0.001)' },
+      { command: 'selftest', description: 'Call /health, /order, /metrics on the API' },
+      { command: 'status',   description: 'Bot uptime, req count, cache hit/miss' },
+      { command: 'help',     description: 'Show usage' },
+      { command: 'swap',     description: 'Open the Mini App (web app)' },
+    ]).catch(() => { /* ignore if bot lacks rights */ });
+
     await bot.launch();
     console.log('Bot is running');
   } catch (e) {
