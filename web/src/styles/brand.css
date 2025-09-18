@@ -1,0 +1,27 @@
+/* Minimal brand styles to keep layout consistent */
+* { box-sizing: border-box; }
+
+:root{
+  --c-bg:#0B0E12;
+  --c-panel:#121721;
+  --c-text:#E5ECF4;
+  --c-sub:#9FB3C8;
+  --c-primary:#6EE7F9;
+  --c-primary-alt:#22D3EE;
+  --c-accent:#A78BFA;
+  --c-success:#34D399;
+  --c-warn:#FBBF24;
+  --c-error:#F87171;
+  --c-border:#1F2A3A;
+}
+
+html,body{
+  margin:0;
+  background:var(--c-bg);
+  color:var(--c-text);
+  -webkit-font-smoothing:antialiased;
+  -moz-osx-font-smoothing:grayscale;
+}
+
+a{ color:var(--c-primary); text-decoration:none; }
+a:hover{ color:var(--c-primary-alt); }
