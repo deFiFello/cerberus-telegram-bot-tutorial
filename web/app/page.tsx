@@ -7,7 +7,7 @@ import { WalletMultiButton } from '@solana/wallet-adapter-react-ui';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
 import { VersionedTransaction } from '@solana/web3.js';
 
-/** ---------- brand tokens (inline) ---------- */
+/* ----------------------- brand tokens (inline) ----------------------- */
 const brand = {
   colors: {
     bg: '#0B0E12',
@@ -30,7 +30,7 @@ const brand = {
   },
 };
 
-/** ---------- tiny inline components ---------- */
+/* ----------------------- tiny inline components ---------------------- */
 function BrandLogo({ size = 56 }: { size?: number }) {
   return (
     <div style={{ display: 'inline-flex', alignItems: 'center', gap: 12 }}>
@@ -88,19 +88,19 @@ function StatusBanner({
   );
 }
 
-/** ---------- constants & types ---------- */
+/* ----------------------- constants & types --------------------------- */
 
 const IN_SOL = 'So11111111111111111111111111111111111111112';
 const OUT_USDC = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+const USDC_DECIMALS = 6;
 
 type QuoteResp = {
-  outAmount?: string;
+  outAmount?: string; // integer string (smallest units)
   routePlan?: Array<{ swapInfo?: { label?: string } }>;
   message?: string;
 };
 
 type BuildTxResp = {
-  // your API may name this differently; we try common keys below
   tx?: string;
   transaction?: string;
   swapTransaction?: string;
@@ -108,17 +108,27 @@ type BuildTxResp = {
   message?: string;
 };
 
-/** ---------- utils ---------- */
+/* ----------------------- utils -------------------------------------- */
 
 // browser-safe base64 -> Uint8Array
 function b64ToBytes(b64: string): Uint8Array {
-  const bin = atob(b64);
+  const bin = atob(b64.trim());
   const out = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
   return out;
 }
 
-/** ---------- page ---------- */
+// best-effort JSON parse that preserves server text errors
+async function parseJsonSafe(res: Response): Promise<any> {
+  const text = await res.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { message: text };
+  }
+}
+
+/* ----------------------- page --------------------------------------- */
 
 export default function Page() {
   const apiBase =
@@ -129,9 +139,8 @@ export default function Page() {
   const [slipBps, setSlipBps] = useState('50');
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [res, setRes] = useState<QuoteResp | null>(null);
-  const [txStatus, setTxStatus] = useState<'idle' | 'building' | 'sending' | 'ok' | 'fail'>(
-    'idle',
-  );
+
+  const [txStatus, setTxStatus] = useState<'idle' | 'building' | 'sending' | 'ok' | 'fail'>('idle');
   const [sig, setSig] = useState<string | null>(null);
 
   const { connection } = useConnection();
@@ -142,16 +151,25 @@ export default function Page() {
     return res.routePlan.map((r) => r?.swapInfo?.label).filter(Boolean) as string[];
   }, [res]);
 
+  const validInputs =
+    /^\d+$/.test(amountLamports) && Number(amountLamports) > 0 && /^\d+$/.test(slipBps);
+
   const onQuote = async () => {
     try {
       setStatus('loading');
       setRes(null);
-      const url = `${apiBase}/order?inputMint=${IN_SOL}&outputMint=${OUT_USDC}&amount=${encodeURIComponent(
-        amountLamports,
-      )}&slippageBps=${encodeURIComponent(slipBps)}`;
-      const r = await fetch(url);
-      const j = (await r.json()) as QuoteResp;
-      if (!r.ok) throw new Error(j?.message || 'Quote failed');
+
+      const url = new URL('/order', apiBase);
+      url.searchParams.set('inputMint', IN_SOL);
+      url.searchParams.set('outputMint', OUT_USDC);
+      url.searchParams.set('amount', amountLamports);
+      url.searchParams.set('slippageBps', slipBps);
+
+      const r = await fetch(url.toString(), { headers: { accept: 'application/json' } });
+      const j = (await parseJsonSafe(r)) as QuoteResp;
+
+      if (!r.ok) throw new Error(j?.message || `HTTP ${r.status}`);
+
       setRes(j);
       setStatus('success');
     } catch (e: any) {
@@ -166,29 +184,52 @@ export default function Page() {
         alert('Please connect a wallet first.');
         return;
       }
+      if (!validInputs) {
+        alert('Please enter a valid lamports amount and slippage.');
+        return;
+      }
+
       setTxStatus('building');
       setSig(null);
 
-      const url = `${apiBase}/order?inputMint=${IN_SOL}&outputMint=${OUT_USDC}&amount=${encodeURIComponent(
-        amountLamports,
-      )}&slippageBps=${encodeURIComponent(
-        slipBps,
-      )}&buildTx=true&userPublicKey=${publicKey.toBase58()}`;
+      const url = new URL('/order', apiBase);
+      url.searchParams.set('inputMint', IN_SOL);
+      url.searchParams.set('outputMint', OUT_USDC);
+      url.searchParams.set('amount', amountLamports);
+      url.searchParams.set('slippageBps', slipBps);
+      url.searchParams.set('buildTx', 'true');
+      url.searchParams.set('userPublicKey', publicKey.toBase58());
 
-      const r = await fetch(url);
-      const j = (await r.json()) as BuildTxResp;
-      if (!r.ok) throw new Error(j?.message || 'Build transaction failed');
+      const r = await fetch(url.toString(), { headers: { accept: 'application/json' } });
+      const j = (await parseJsonSafe(r)) as BuildTxResp;
+
+      if (!r.ok) throw new Error(j?.message || `HTTP ${r.status}`);
 
       const txB64 =
-        j.tx || j.transaction || j.swapTransaction || j.signedTransaction || '';
-
+        j.tx || j.swapTransaction || j.transaction || j.signedTransaction || '';
       if (!txB64) throw new Error('Missing transaction in API response');
 
       const raw = b64ToBytes(txB64);
       const tx = VersionedTransaction.deserialize(raw);
 
       setTxStatus('sending');
-      const signature = await sendTransaction(tx, connection, { skipPreflight: false });
+
+      // send via wallet adapter
+      const signature = await sendTransaction(tx, connection, {
+        skipPreflight: false,
+        maxRetries: 3,
+      });
+
+      const latest = await connection.getLatestBlockhash();
+      await connection.confirmTransaction(
+        {
+          signature,
+          blockhash: latest.blockhash,
+          lastValidBlockHeight: latest.lastValidBlockHeight,
+        },
+        'confirmed'
+      );
+
       setSig(signature);
       setTxStatus('ok');
     } catch (e: any) {
@@ -197,6 +238,13 @@ export default function Page() {
       alert(e?.message || 'Transaction failed');
     }
   };
+
+  const formattedOut = useMemo(() => {
+    if (!res?.outAmount) return null;
+    const v = Number(res.outAmount) / 10 ** USDC_DECIMALS;
+    if (!Number.isFinite(v)) return null;
+    return v.toLocaleString(undefined, { maximumFractionDigits: USDC_DECIMALS });
+  }, [res?.outAmount]);
 
   return (
     <main
@@ -231,9 +279,8 @@ export default function Page() {
           }}
         >
           <BrandLogo size={48} />
-          {/* Real wallet button (works with Phantom, Backpack, Solflare, Seeker via MWA, etc.) */}
           <div style={{ display: 'inline-flex' }}>
-          <WalletMultiButton />
+            <WalletMultiButton />
           </div>
         </header>
 
@@ -310,42 +357,52 @@ export default function Page() {
         <div style={{ display: 'flex', gap: 12, marginBottom: 14 }}>
           <button
             onClick={onQuote}
-            disabled={status === 'loading'}
+            disabled={status === 'loading' || !validInputs}
             style={{
               padding: '12px 16px',
               borderRadius: brand.radii.md,
-              background: status === 'loading' ? brand.colors.primaryAlt : brand.colors.primary,
+              background:
+                status === 'loading' || !validInputs
+                  ? brand.colors.primaryAlt
+                  : brand.colors.primary,
               color: '#0B0E12',
               fontWeight: 800,
               border: 'none',
-              cursor: 'pointer',
+              cursor: status === 'loading' || !validInputs ? 'not-allowed' : 'pointer',
             }}
+            title={!validInputs ? 'Enter a valid lamports amount & slippage' : 'Get a quote'}
           >
             {status === 'loading' ? 'Fetching Quote…' : 'Get Quote'}
           </button>
 
           <button
             onClick={onBuildAndSign}
-            disabled={!connected || txStatus === 'building' || txStatus === 'sending'}
+            disabled={!connected || !validInputs || txStatus === 'building' || txStatus === 'sending'}
             style={{
               padding: '12px 16px',
               borderRadius: brand.radii.md,
               background:
-                !connected || txStatus === 'building' || txStatus === 'sending'
+                !connected || !validInputs || txStatus === 'building' || txStatus === 'sending'
                   ? brand.colors.primaryAlt
                   : brand.colors.accent,
               color: '#0B0E12',
               fontWeight: 800,
               border: 'none',
-              cursor: !connected ? 'not-allowed' : 'pointer',
+              cursor: !connected || !validInputs ? 'not-allowed' : 'pointer',
             }}
-            title={!connected ? 'Connect a wallet first' : 'Build and sign the swap'}
+            title={
+              !connected
+                ? 'Connect a wallet first'
+                : !validInputs
+                ? 'Enter a valid lamports amount & slippage'
+                : 'Build and sign the swap'
+            }
           >
             {txStatus === 'building'
               ? 'Building…'
               : txStatus === 'sending'
               ? 'Sending…'
-              : 'Build & Sign (WIP)'}
+              : 'Build & Sign'}
           </button>
         </div>
 
@@ -390,7 +447,7 @@ export default function Page() {
               }}
             >
               <div style={{ fontSize: 13, color: brand.colors.subtext }}>
-                Expected Out (USDC, 6dp)
+                Expected Out (USDC)
               </div>
               <div
                 style={{
@@ -399,7 +456,7 @@ export default function Page() {
                   fontSize: 18,
                 }}
               >
-                {res?.outAmount ?? '—'}
+                {formattedOut ?? '—'}
               </div>
             </div>
             <div
@@ -424,7 +481,6 @@ export default function Page() {
           </section>
         )}
 
-        {/* Tx result */}
         {txStatus !== 'idle' && (
           <div style={{ marginTop: 12 }}>
             <StatusBanner
