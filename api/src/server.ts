@@ -1,13 +1,27 @@
+// api/src/server.ts
 import 'dotenv/config';
-import express, { Request, Response } from 'express';
+import express, { Request, Response, NextFunction } from 'express';
+import cors from 'cors';
 import { TTLCache, quoteKey } from './lib/quoteCache.js'; // ESM: include .js
 
 // ---------- Config ----------
 const PORT = Number(process.env.PORT || 4000);
+
+// Jupiter endpoints
 const QUOTE_BASE = process.env.QUOTE_BASE || 'https://quote-api.jup.ag';
 const LITE_BASE  = process.env.LITE_BASE  || 'https://lite-api.jup.ag';
 const ULTRA_BASE = process.env.ULTRA_BASE || 'https://api.jup.ag/ultra';
 const JUP_ULTRA_KEY = process.env.JUP_ULTRA_KEY || '';
+
+// Web origin allow-list (CORS). Accepts either WEB_ORIGIN (single) or WEB_ORIGINS (comma list).
+const ORIGINS = (
+  process.env.WEB_ORIGINS ||
+  process.env.WEB_ORIGIN ||
+  ''
+)
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean);
 
 // Denylist for demo safety gate
 const DENY_MINTS = new Set(
@@ -57,20 +71,36 @@ function snapshot() {
 // ---------- App ----------
 export const app = express(); // export for tests
 app.set('trust proxy', true);
+
+// CORS with allow-list (if no origins are set, allow all; curl/no-origin is allowed).
+const allowAll = ORIGINS.length === 0;
+const corsOptions: cors.CorsOptions = {
+  origin: (origin, cb) => {
+    if (allowAll || !origin) return cb(null, true);
+    return cb(null, ORIGINS.includes(origin));
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['content-type', 'authorization'],
+};
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
+
 app.use(express.json());
 
 // ---------- Helpers ----------
 async function fetchJson<T = any>(
   url: string,
   init?: RequestInit
-): Promise<{ ok: boolean; status: number; data?: T; error?: any }> {
+): Promise<{ ok: true; status: number; data: T } | { ok: false; status: number; error: any }> {
   const r = await fetch(url, init as any);
   if (!r.ok) {
     let body: any = undefined;
     try { body = await r.text(); } catch {}
     return { ok: false, status: r.status, error: body || `HTTP ${r.status}` };
   }
-  return { ok: true, status: r.status, data: (await r.json()) as T };
+  const data = (await r.json()) as T;
+  return { ok: true, status: r.status, data };
 }
 
 // ---------- Routes ----------
@@ -89,25 +119,30 @@ app.get('/', (_req, res) => {
 });
 
 app.get('/health', (_req, res) => {
+  res.setHeader('cache-control', 'no-store');
   res.json({
     ok: true,
     quoteBase: QUOTE_BASE,
     liteBase: LITE_BASE,
     ultraBase: ULTRA_BASE,
     cache: { enabled: true, kind: 'ttl-inproc', ttlMs: 15_000, max: 500 },
+    cors: { allowAll, origins: ORIGINS },
     time: new Date().toISOString(),
   });
 });
 
 app.get('/metrics', (_req, res) => {
+  res.setHeader('cache-control', 'no-store');
   res.json(snapshot());
 });
 
 app.get('/tokens', async (_req, res) => {
   const url = `${LITE_BASE}/tokens`;
-  const { ok, status, data, error } = await fetchJson(url);
-  if (!ok) return res.status(status).json({ ok: false, error });
-  res.json(data);
+  const resp = await fetchJson(url);
+  if (!resp.ok) return res.status(resp.status).json({ ok: false, error: resp.error });
+  res.setHeader('cache-control', 'no-store');
+  res.setHeader('x-cache', 'MISS');
+  res.json(resp.data);
 });
 
 app.get('/shield', async (req, res) => {
@@ -117,9 +152,11 @@ app.get('/shield', async (req, res) => {
   if (!shieldBase) return res.status(501).json({ ok: false, error: 'SHIELD_BASE not configured' });
 
   const url = `${shieldBase}?mints=${encodeURIComponent(mints)}`;
-  const { ok, status, data, error } = await fetchJson(url);
-  if (!ok) return res.status(status).json({ ok: false, error });
-  res.json(data);
+  const resp = await fetchJson(url);
+  if (!resp.ok) return res.status(resp.status).json({ ok: false, error: resp.error });
+  res.setHeader('cache-control', 'no-store');
+  res.setHeader('x-cache', 'MISS');
+  res.json(resp.data);
 });
 
 app.get('/order', async (req: Request, res: Response) => {
@@ -134,7 +171,10 @@ app.get('/order', async (req: Request, res: Response) => {
   const userPublicKey = String(req.query.userPublicKey || '');
 
   if (!inputMint || !outputMint || !amount || !slippageBps) {
-    return res.status(400).json({ ok: false, error: 'missing required params: inputMint, outputMint, amount, slippageBps' });
+    return res.status(400).json({
+      ok: false,
+      error: 'missing required params: inputMint, outputMint, amount, slippageBps'
+    });
   }
   if (buildTx && !userPublicKey) {
     return res.status(400).json({ ok: false, error: 'buildTx=true requires userPublicKey' });
@@ -157,6 +197,7 @@ app.get('/order', async (req: Request, res: Response) => {
   if (cached) {
     metrics.order.cache.hit++;
     metrics.order.latencyMs.push(Date.now() - t0);
+    res.setHeader('cache-control', 'no-store');
     res.setHeader('x-cache', 'HIT');
     return res.json(cached);
   }
@@ -167,6 +208,7 @@ app.get('/order', async (req: Request, res: Response) => {
   const quoteResp = await fetchJson<any>(quoteUrl);
   if (!quoteResp.ok) {
     metrics.order.latencyMs.push(Date.now() - t0);
+    res.setHeader('cache-control', 'no-store');
     res.setHeader('x-cache', 'MISS');
     return res.status(quoteResp.status).json({ ok: false, error: quoteResp.error });
   }
@@ -182,30 +224,59 @@ app.get('/order', async (req: Request, res: Response) => {
       dynamicSlippage: false,
       prioritizationFeeLamports: undefined,
     };
+    const headers: Record<string, string> = {
+      'content-type': 'application/json',
+      ...(JUP_ULTRA_KEY ? { 'x-api-key': JUP_ULTRA_KEY } : {}),
+    };
     const swapResp = await fetchJson<any>(swapUrl, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers,
       body: JSON.stringify(swapBody),
     });
     if (!swapResp.ok) {
       metrics.order.latencyMs.push(Date.now() - t0);
+      res.setHeader('cache-control', 'no-store');
       res.setHeader('x-cache', 'MISS');
       return res.status(swapResp.status).json({ ok: false, error: swapResp.error });
     }
-    payload = { ...payload, swapTransaction: swapResp.data?.swapTransaction };
+
+    // Include the built tx; Jupiter returns base64 under `swapTransaction`.
+    payload = {
+      ...payload,
+      swapTransaction: swapResp.data?.swapTransaction,
+    };
+    // Convenience alias so frontends can read either `tx` or `swapTransaction`
+    if (payload.swapTransaction && !payload.tx) {
+      payload.tx = payload.swapTransaction;
+    }
   }
 
   // Store & return
   quoteCache.set(key, payload);
   metrics.order.cache.miss++;
   metrics.order.latencyMs.push(Date.now() - t0);
+  res.setHeader('cache-control', 'no-store');
   res.setHeader('x-cache', 'MISS');
   return res.json(payload);
+});
+
+// ---------- Basic error -> JSON ----------
+app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+  if (err?.message?.toLowerCase().includes('cors')) {
+    return res.status(403).json({ ok: false, error: 'cors_not_allowed' });
+  }
+  console.error('Unhandled error:', err);
+  res.status(500).json({ ok: false, error: 'internal_error' });
 });
 
 // ---------- Start server (skip in tests) ----------
 if (process.env.NODE_ENV !== 'test') {
   app.listen(PORT, () => {
     console.log(`Cerberus API listening on :${PORT}`);
+    if (allowAll) {
+      console.log('CORS: allowing all origins');
+    } else {
+      console.log('CORS allow-list:', ORIGINS);
+    }
   });
 }
