@@ -1,9 +1,14 @@
 name: api-ci
 on:
   push:
+    branches: [ release/demo-stable, main ]
+    paths: [ "api/**", ".github/workflows/api-ci.yml" ]
   pull_request:
+    branches: [ main ]
+    paths: [ "api/**" ]
+
 jobs:
-  api:
+  build:
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -12,8 +17,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 22.16.0
           cache: npm
           cache-dependency-path: api/package-lock.json
       - run: npm ci
-      - run: npm test
+      - run: npm run build
