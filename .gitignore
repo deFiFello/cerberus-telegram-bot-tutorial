@@ -34,3 +34,5 @@ pnpm-debug.log*
 *.b64
 swap.txt
 api/swap_tx.b64
+
+cerberus-telegram-bot-tutorial/
