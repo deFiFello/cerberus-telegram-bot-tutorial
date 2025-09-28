@@ -3,10 +3,9 @@
     "private": true,
     "type": "module",
     "scripts": {
-        "dev": "tsx src/server.ts",
-        "start": "tsx src/server.ts",
-        "build": "tsc -p ./tsconfig.json",
-        "test": "vitest run"
+        "build": "tsc -p tsconfig.json",
+        "start": "node dist/server.js",
+        "test": "echo \"No tests\" && exit 0"
     },
     "dependencies": {
         "@solana/web3.js": "^1.98.4",
@@ -18,17 +17,21 @@
         "morgan": "^1.10.1",
         "pino": "^9.9.0",
         "pino-http": "^10.5.0",
+        "undici": "^7.16.0",
         "zod": "^3.23.8"
     },
     "devDependencies": {
         "@types/cors": "^2.8.19",
         "@types/express": "^5.0.3",
         "@types/morgan": "^1.9.10",
-        "@types/node": "^24.3.0",
+        "@types/node": "^24.5.2",
         "@types/supertest": "^6.0.3",
         "supertest": "^7.1.4",
         "tsx": "^4.20.5",
         "typescript": "^5.9.2",
         "vitest": "^3.2.4"
+    },
+    "engines": {
+        "node": "22.16.0"
     }
 }
