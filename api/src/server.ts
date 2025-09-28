@@ -27,7 +27,7 @@ const quoteCache = new TTLCache<any>(3_000);
 // ---------- App ----------
 const app = express();
 
-// Typed CORS options (fixes TS7006 on Render)
+// Typed CORS options
 const corsOptions: CorsOptions = ALLOW_ALL
   ? { origin: true, credentials: false }
   : {
@@ -72,7 +72,7 @@ function isDigits(x: string): boolean {
 
 function looksLikeBase58Pubkey(x: string): boolean {
   if (!x || x.length < 32 || x.length > 64) return false;
-  if (/[0OIl]/.test(x)) return false; // ambigious base58 chars
+  if (/[0OIl]/.test(x)) return false; // ambiguous base58 chars
   return /^[1-9A-HJ-NP-Za-km-z]+$/.test(x);
 }
 
@@ -87,7 +87,7 @@ function sendCacheHeaders(res: Response, hit: boolean): void {
 }
 
 // ---------- Routes ----------
-app.get('/', (_req, res) => {
+app.get('/', (_req: Request, res: Response) => {
   res
     .type('text/plain')
     .send(
@@ -101,19 +101,19 @@ app.get('/', (_req, res) => {
     );
 });
 
-app.get('/health', (_req, res) => {
+app.get('/health', (_req: Request, res: Response) => {
   sendCacheHeaders(res, false);
   res.json({ ok: true, status: 'healthy', time: Date.now() });
 });
 
-app.get('/tokens', async (_req, res) => {
+app.get('/tokens', async (_req: Request, res: Response) => {
   const j = await fetchJson('https://lite-api.jup.ag/tokens');
   if (!j.ok) return res.status(j.status).json({ ok: false, error: j.error });
   sendCacheHeaders(res, false);
   res.json(j.data);
 });
 
-app.get('/shield', async (req, res) => {
+app.get('/shield', async (req: Request, res: Response) => {
   const mints = String(req.query.mints || '').trim();
   const shieldBase = process.env.SHIELD_BASE || '';
   if (!mints) return res.status(400).json({ ok: false, error: 'missing mints' });
@@ -204,7 +204,7 @@ app.get('/order', async (req: Request, res: Response) => {
     }
 
     payload = { ...payload, swapTransaction: txAny };
-    if (!payload.tx) payload.tx = txAny; // keep compatibility with clients expecting `tx`
+    if (!payload.tx) payload.tx = txAny; // compatibility for clients expecting `tx`
   }
 
   quoteCache.set(key, payload);
