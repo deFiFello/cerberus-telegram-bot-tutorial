@@ -5,33 +5,41 @@ on:
   push:
     branches: [ main, release/demo-stable ]
   schedule:
-    - cron: "0 */6 * * *"   # every 6 hours
+    - cron: "0 */6 * * *"
 
 jobs:
   api:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     env:
-      BASE: https://cerberus-telegram-bot-tutorial.onrender.com  # API service URL
+      BASE: https://cerberus-telegram-bot-tutorial.onrender.com
       IN: So11111111111111111111111111111111111111112
       OUT: EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v
       AMT: 1000000
       SLIP: 50
     steps:
-      - name: Health 200 (with warmup retry)
+      - name: Wake service (hit root, ignore errors)
+        shell: bash
+        run: |
+          curl -sS "${BASE}/" >/dev/null || true
+          sleep 5
+
+      - name: Health 200 (retry up to 5 min)
         shell: bash
         run: |
           set -euo pipefail
           URL="${BASE}/health"
-          echo "Pinging: $URL"
-          for i in {1..18}; do   # ~3 minutes total
+          for i in {1..60}; do
             code=$(curl -s -o /dev/null -w "%{http_code}" "$URL" || echo 000)
             echo "Attempt $i -> HTTP $code"
             if [ "$code" = "200" ]; then
-              echo "OK"
-              exit 0
+              echo "OK"; exit 0
             fi
-            sleep 10
+            # If still hibernating, poke root too
+            if [ "$code" = "503" ] || [ "$code" = "502" ]; then
+              curl -sS "${BASE}/" >/dev/null || true
+            fi
+            sleep 5
           done
           echo "API never returned 200"
           curl -v "$URL" || true
@@ -45,9 +53,7 @@ jobs:
           hit=0
           for i in 1 2 3; do
             echo "try #$i -> $URL"
-            # -f fail on non-2xx, -S show errors, -s silent body
             curl -fsSi "$URL" -o /tmp/body.txt > /tmp/headers.txt
-            echo "---- headers"
             awk 'BEGIN{IGNORECASE=1}/^HTTP\/|^x-cache:|^content-type:/{print}' /tmp/headers.txt
             if grep -qi '^x-cache: *hit' /tmp/headers.txt; then hit=1; break; fi
             sleep 3
