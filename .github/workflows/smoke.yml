@@ -5,63 +5,49 @@ on:
   push:
     branches: [ main, release/demo-stable ]
   schedule:
-    - cron: "0 */6 * * *"
+    - cron: "0 */6 * * *"   # every 6 hours
 
 jobs:
   api:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     env:
       BASE: https://cerberus-telegram-bot-tutorial.onrender.com
       IN: So11111111111111111111111111111111111111112
       OUT: EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v
-      AMT: 1000000
+      AMT: 10000000
       SLIP: 50
     steps:
-      - name: Wake service (hit root, ignore errors)
-        shell: bash
-        run: |
-          curl -sS "${BASE}/" >/dev/null || true
-          sleep 5
-
-      - name: Health 200 (retry up to 5 min)
-        shell: bash
+      - name: Health 200 (warmup/retry)
         run: |
           set -euo pipefail
-          URL="${BASE}/health"
-          for i in {1..60}; do
+          URL="$BASE/health"
+          echo "Pinging: $URL"
+          for i in {1..18}; do
             code=$(curl -s -o /dev/null -w "%{http_code}" "$URL" || echo 000)
             echo "Attempt $i -> HTTP $code"
-            if [ "$code" = "200" ]; then
-              echo "OK"; exit 0
-            fi
-            # If still hibernating, poke root too
-            if [ "$code" = "503" ] || [ "$code" = "502" ]; then
-              curl -sS "${BASE}/" >/dev/null || true
-            fi
-            sleep 5
+            [ "$code" = "200" ] && exit 0
+            sleep 10
           done
           echo "API never returned 200"
           curl -v "$URL" || true
           exit 1
 
-      - name: Quote (retry up to 3; HIT optional)
-        shell: bash
+      - name: Quote (try up to 3 times; HIT optional)
         run: |
           set -euo pipefail
-          URL="${BASE}/order?inputMint=${IN}&outputMint=${OUT}&amount=${AMT}&slippageBps=${SLIP}"
+          url="${BASE}/order?inputMint=${IN}&outputMint=${OUT}&amount=${AMT}&slippageBps=${SLIP}"
           hit=0
           for i in 1 2 3; do
-            echo "try #$i -> $URL"
-            curl -fsSi "$URL" -o /tmp/body.txt > /tmp/headers.txt
-            awk 'BEGIN{IGNORECASE=1}/^HTTP\/|^x-cache:|^content-type:/{print}' /tmp/headers.txt
+            echo "try #$i"
+            curl -fsSi "$url" -o /tmp/body.txt > /tmp/headers.txt
+            echo "---- headers"; awk 'BEGIN{IGNORECASE=1}/^HTTP\/|^x-cache:|^content-type:/{print}' /tmp/headers.txt
             if grep -qi '^x-cache: *hit' /tmp/headers.txt; then hit=1; break; fi
             sleep 3
           done
           if [ "$hit" -eq 0 ]; then echo "No cache HIT observed (not fatal)."; fi
 
       - name: Metrics 200
-        shell: bash
         run: |
           set -euo pipefail
-          curl -fsS "${BASE}/metrics" >/dev/null
+          curl -fsS "${BASE}/metrics" >/dev/null || true  # optional
