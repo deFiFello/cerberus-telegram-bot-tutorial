@@ -141,6 +141,7 @@ export default function Page() {
   const [res, setRes] = useState<QuoteResp | null>(null);
 
   const [txStatus, setTxStatus] = useState<'idle' | 'building' | 'sending' | 'ok' | 'fail'>('idle');
+  const [txMsg, setTxMsg] = useState<string>(''); // <-- message shown in tx banner
   const [sig, setSig] = useState<string | null>(null);
 
   const { connection } = useConnection();
@@ -180,16 +181,20 @@ export default function Page() {
 
   const onBuildAndSign = async () => {
     try {
+      // validation without blocking alerts
       if (!connected || !publicKey) {
-        alert('Please connect a wallet first.');
+        setTxStatus('fail');
+        setTxMsg('Connect a wallet first.');
         return;
       }
       if (!validInputs) {
-        alert('Please enter a valid lamports amount and slippage.');
+        setTxStatus('fail');
+        setTxMsg('Enter a valid lamports amount & slippage.');
         return;
       }
 
       setTxStatus('building');
+      setTxMsg('');
       setSig(null);
 
       const url = new URL('/order', apiBase);
@@ -232,10 +237,12 @@ export default function Page() {
 
       setSig(signature);
       setTxStatus('ok');
+      setTxMsg(`Sent ✓ ${signature}`);
     } catch (e: any) {
       console.error('build/sign error', e);
       setTxStatus('fail');
-      alert(e?.message || 'Transaction failed');
+      setTxMsg(e?.message || 'Transaction failed');
+      // no alert — we surface the error inline
     }
   };
 
@@ -487,9 +494,9 @@ export default function Page() {
               kind={txStatus === 'ok' ? 'success' : txStatus === 'fail' ? 'error' : 'loading'}
               message={
                 txStatus === 'ok'
-                  ? `Sent ✓ ${sig}`
+                  ? txMsg || (sig ? `Sent ✓ ${sig}` : 'Sent ✓')
                   : txStatus === 'fail'
-                  ? 'Transaction failed'
+                  ? txMsg || 'Transaction failed'
                   : txStatus === 'sending'
                   ? 'Awaiting confirmation…'
                   : 'Building transaction…'
