@@ -1,4 +1,19 @@
 <!-- Badges -->
+
+## Quick Setup (RPC)
+
+The web app **must** have a public Solana RPC set to avoid 403s from `api.mainnet-beta.solana.com`. Set `NEXT_PUBLIC_SOLANA_RPC` to a provider like Ankr/Helius/Alchemy/QuickNode.
+
+Local dev (copy to `web/.env.local`):
+
+```
+NEXT_PUBLIC_API_BASE=http://localhost:4000
+NEXT_PUBLIC_NETWORK=mainnet
+NEXT_PUBLIC_SOLANA_RPC=https://rpc.ankr.com/solana
+```
+
+On Render (Environment → Environment Variables): set `NEXT_PUBLIC_SOLANA_RPC` to your provider URL, redeploy the web service.
+
 <p align="center">
   <a href="https://github.com/deFiFello/cerberus-telegram-bot-tutorial/actions/workflows/api-ci.yml">
     <img alt="API CI" src="https://github.com/deFiFello/cerberus-telegram-bot-tutorial/actions/workflows/api-ci.yml/badge.svg">
