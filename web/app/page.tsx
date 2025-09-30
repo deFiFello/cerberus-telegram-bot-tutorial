@@ -1,4 +1,3 @@
-// web/app/page.tsx
 'use client';
 
 import Image from 'next/image';
@@ -81,6 +80,7 @@ function StatusBanner({
         background: brand.colors.panel,
         color,
         fontSize: 14,
+        wordBreak: 'break-word',
       }}
     >
       {message}
@@ -141,11 +141,11 @@ export default function Page() {
   const [res, setRes] = useState<QuoteResp | null>(null);
 
   const [txStatus, setTxStatus] = useState<'idle' | 'building' | 'sending' | 'ok' | 'fail'>('idle');
-  const [txMsg, setTxMsg] = useState<string>(''); // <-- message shown in tx banner
+  const [txError, setTxError] = useState<string>('');
   const [sig, setSig] = useState<string | null>(null);
 
   const { connection } = useConnection();
-  const { publicKey, connected, sendTransaction } = useWallet();
+  const { publicKey, connected, sendTransaction, signTransaction } = useWallet();
 
   const routeLabels = useMemo(() => {
     if (!res?.routePlan) return [];
@@ -181,20 +181,19 @@ export default function Page() {
 
   const onBuildAndSign = async () => {
     try {
-      // validation without blocking alerts
       if (!connected || !publicKey) {
         setTxStatus('fail');
-        setTxMsg('Connect a wallet first.');
+        setTxError('Connect a wallet first.');
         return;
       }
       if (!validInputs) {
         setTxStatus('fail');
-        setTxMsg('Enter a valid lamports amount & slippage.');
+        setTxError('Enter a valid lamports amount and slippage.');
         return;
       }
 
       setTxStatus('building');
-      setTxMsg('');
+      setTxError('');
       setSig(null);
 
       const url = new URL('/order', apiBase);
@@ -219,11 +218,32 @@ export default function Page() {
 
       setTxStatus('sending');
 
-      // send via wallet adapter
-      const signature = await sendTransaction(tx, connection, {
-        skipPreflight: false,
-        maxRetries: 3,
-      });
+      let signature: string | null = null;
+
+      try {
+        // primary path: adapter handles sign & send
+        signature = await sendTransaction(tx, connection, {
+          skipPreflight: false,
+          maxRetries: 3,
+        });
+      } catch (primaryErr: any) {
+        // fallback: sign locally (if available) then send ourselves
+        if (typeof signTransaction === 'function') {
+          try {
+            const signed = await signTransaction(tx);
+            signature = await connection.sendRawTransaction(signed.serialize(), {
+              skipPreflight: false,
+              maxRetries: 3,
+            });
+          } catch (fallbackErr: any) {
+            throw fallbackErr;
+          }
+        } else {
+          throw primaryErr;
+        }
+      }
+
+      if (!signature) throw new Error('Failed to obtain transaction signature');
 
       const latest = await connection.getLatestBlockhash();
       await connection.confirmTransaction(
@@ -237,12 +257,14 @@ export default function Page() {
 
       setSig(signature);
       setTxStatus('ok');
-      setTxMsg(`Sent ✓ ${signature}`);
     } catch (e: any) {
       console.error('build/sign error', e);
+      // trim very technical messages
+      const msg = String(e?.message || e || 'Transaction failed')
+        .replace(/^Error:\s*/i, '')
+        .replace(/signature must be base58 encoded:.*/i, 'Wallet returned an invalid signature format.');
+      setTxError(msg);
       setTxStatus('fail');
-      setTxMsg(e?.message || 'Transaction failed');
-      // no alert — we surface the error inline
     }
   };
 
@@ -494,9 +516,9 @@ export default function Page() {
               kind={txStatus === 'ok' ? 'success' : txStatus === 'fail' ? 'error' : 'loading'}
               message={
                 txStatus === 'ok'
-                  ? txMsg || (sig ? `Sent ✓ ${sig}` : 'Sent ✓')
+                  ? `Sent ✓ ${sig}`
                   : txStatus === 'fail'
-                  ? txMsg || 'Transaction failed'
+                  ? (txError || 'Transaction failed')
                   : txStatus === 'sending'
                   ? 'Awaiting confirmation…'
                   : 'Building transaction…'
