@@ -103,17 +103,60 @@ type QuoteResp = {
 };
 
 type BuildTxResp = {
-  /** Jupiter returns one or more of these; we use the *unsigned* variant */
-  tx?: string;
-  transaction?: string;
-  swapTransaction?: string; // preferred unsigned
-  signedTransaction?: string; // ignore if present
+  // Jupiter commonly returns one or more of these. Ignore *signed* variants.
+  tx?: string;                // base64 unsigned
+  transaction?: string;       // base64 unsigned
+  swapTransaction?: string;   // base64 unsigned (preferred)
+  signedTransaction?: string; // base64 signed (unused)
   message?: string;
 };
 
 /* ============================ Helpers ============================ */
 
-// base64 → Uint8Array (browser-safe)
+// Robustly turn *anything* into base58
+function normalizeSignature(sig: unknown): string {
+  // Already base58?
+  if (typeof sig === 'string') {
+    try {
+      bs58.decode(sig);
+      return sig; // valid base58
+    } catch {
+      // not base58 → try base64
+      try {
+        const asBytes = b64ToBytes(sig);
+        return bs58.encode(asBytes);
+      } catch {
+        // maybe hex
+        if (/^(0x)?[0-9a-fA-F]+$/.test(sig)) {
+          const hex = sig.replace(/^0x/, '');
+          const out = new Uint8Array(hex.length / 2);
+          for (let i = 0; i < out.length; i++) {
+            out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+          }
+          return bs58.encode(out);
+        }
+      }
+    }
+  }
+
+  // Uint8Array / Buffer / number-array
+  const bytes =
+    (sig &&
+      (sig as any).constructor &&
+      (sig as any).constructor.name === 'Uint8Array' &&
+      (sig as Uint8Array)) ||
+    (Array.isArray(sig) && new Uint8Array(sig as number[])) ||
+    ((sig as any)?.data &&
+      Array.isArray((sig as any).data) &&
+      new Uint8Array((sig as any).data)) ||
+    null;
+
+  if (bytes) return bs58.encode(bytes);
+
+  throw new Error('Wallet returned an invalid signature format.');
+}
+
+// browser-safe base64 -> Uint8Array
 function b64ToBytes(b64: string): Uint8Array {
   const bin = atob(b64.trim());
   const out = new Uint8Array(bin.length);
@@ -121,7 +164,7 @@ function b64ToBytes(b64: string): Uint8Array {
   return out;
 }
 
-// best-effort JSON parse that keeps raw text if not JSON
+// best-effort JSON parse that preserves server text errors
 async function parseJsonSafe(res: Response): Promise<any> {
   const text = await res.text();
   try {
@@ -129,29 +172,6 @@ async function parseJsonSafe(res: Response): Promise<any> {
   } catch {
     return { message: text };
   }
-}
-
-/** Normalize whatever a wallet returns into a base58 signature string. */
-function normalizeSignature(sig: unknown): string | null {
-  // strings (base58 or hex-like); accept & let confirmTransaction validate
-  if (typeof sig === 'string') return sig;
-
-  // objects like { signature: <bytes> }
-  if (sig && typeof sig === 'object' && 'signature' in (sig as any)) {
-    return normalizeSignature((sig as any).signature);
-  }
-
-  // bytes shapes
-  const toBytes = (x: any): Uint8Array | null => {
-    if (x instanceof Uint8Array) return x;
-    if (Array.isArray(x)) return Uint8Array.from(x);
-    if (x && typeof x === 'object' && 'data' in x && Array.isArray((x as any).data)) {
-      return Uint8Array.from((x as any).data);
-    }
-    return null;
-  };
-  const bytes = toBytes(sig as any);
-  return bytes ? bs58.encode(bytes) : null;
 }
 
 /* ============================ Page ============================ */
@@ -163,11 +183,15 @@ export default function Page() {
 
   const [amountLamports, setAmountLamports] = useState('1000000'); // 0.001 SOL
   const [slipBps, setSlipBps] = useState('50');
-  const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+
+  const [status, setStatus] =
+    useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [res, setRes] = useState<QuoteResp | null>(null);
 
-  const [txStatus, setTxStatus] = useState<'idle' | 'building' | 'sending' | 'ok' | 'fail'>('idle');
-  const [sig, setSig] = useState<string | null>(null);
+  const [txStatus, setTxStatus] =
+    useState<'idle' | 'building' | 'sending' | 'ok' | 'fail'>('idle');
+  const [sig58, setSig58] = useState<string | null>(null);
+  const [errMsg, setErrMsg] = useState<string | null>(null);
 
   const { connection } = useConnection();
   const { publicKey, connected, sendTransaction } = useWallet();
@@ -179,6 +203,8 @@ export default function Page() {
 
   const validInputs =
     /^\d+$/.test(amountLamports) && Number(amountLamports) > 0 && /^\d+$/.test(slipBps);
+
+  /* ----------------------- Quote ----------------------- */
 
   const onQuote = async () => {
     try {
@@ -204,20 +230,26 @@ export default function Page() {
     }
   };
 
+  /* ------------------- Build & Sign -------------------- */
+
   const onBuildAndSign = async () => {
     try {
       if (!connected || !publicKey) {
-        alert('Please connect a wallet first.');
+        setTxStatus('fail');
+        setErrMsg('Please connect a wallet first.');
         return;
       }
       if (!validInputs) {
-        alert('Please enter a valid lamports amount and slippage.');
+        setTxStatus('fail');
+        setErrMsg('Please enter a valid lamports amount and slippage.');
         return;
       }
 
       setTxStatus('building');
-      setSig(null);
+      setErrMsg(null);
+      setSig58(null);
 
+      // Get unsigned tx from API (Jupiter route)
       const url = new URL('/order', apiBase);
       url.searchParams.set('inputMint', IN_SOL);
       url.searchParams.set('outputMint', OUT_USDC);
@@ -228,10 +260,10 @@ export default function Page() {
 
       const r = await fetch(url.toString(), { headers: { accept: 'application/json' } });
       const j = (await parseJsonSafe(r)) as BuildTxResp;
-
       if (!r.ok) throw new Error(j?.message || `HTTP ${r.status}`);
 
-      const txB64 = j.swapTransaction || j.tx || j.transaction || '';
+      const txB64 =
+        j.swapTransaction || j.tx || j.transaction || ''; // ignore signedTransaction
       if (!txB64) throw new Error('Missing transaction in API response');
 
       const raw = b64ToBytes(txB64);
@@ -239,35 +271,30 @@ export default function Page() {
 
       setTxStatus('sending');
 
-      // Wallets may return string, bytes, or object—normalize it.
-      const sigRaw = await sendTransaction(tx, connection, {
+      // Wallet returns signature in various shapes; normalize to base58.
+      const rawSig = await sendTransaction(tx, connection, {
         skipPreflight: false,
         maxRetries: 3,
       });
-      const signature = normalizeSignature(sigRaw);
-      if (!signature) throw new Error('Could not normalize wallet signature');
+      const asBase58 = normalizeSignature(rawSig);
 
-      const latest = await connection.getLatestBlockhash();
+      // Confirm against latest blockhash
+      const latest = await connection.getLatestBlockhash('confirmed');
       await connection.confirmTransaction(
         {
-          signature,
+          signature: asBase58,
           blockhash: latest.blockhash,
           lastValidBlockHeight: latest.lastValidBlockHeight,
         },
         'confirmed',
       );
 
-      setSig(signature);
+      setSig58(asBase58);
       setTxStatus('ok');
     } catch (e: any) {
       console.error('build/sign error', e);
+      setErrMsg(e?.message || 'Transaction failed');
       setTxStatus('fail');
-      // Show a concise message the user understands
-      const msg =
-        e?.message?.includes('normalize wallet signature')
-          ? 'Wallet returned an unexpected signature shape.'
-          : e?.message || 'Transaction failed';
-      alert(msg);
     }
   };
 
@@ -277,6 +304,8 @@ export default function Page() {
     if (!Number.isFinite(v)) return null;
     return v.toLocaleString(undefined, { maximumFractionDigits: USDC_DECIMALS });
   }, [res?.outAmount]);
+
+  /* ------------------------- UI ------------------------ */
 
   return (
     <main
@@ -518,17 +547,18 @@ export default function Page() {
               kind={txStatus === 'ok' ? 'success' : txStatus === 'fail' ? 'error' : 'loading'}
             >
               {txStatus === 'ok'
-                ? `Sent ✓ ${sig}`
+                ? `Sent ✓ ${sig58}`
                 : txStatus === 'fail'
-                ? 'Transaction failed'
+                ? errMsg || 'Transaction failed'
                 : txStatus === 'sending'
                 ? 'Awaiting confirmation…'
                 : 'Building transaction…'}
             </StatusBanner>
-            {sig && (
+
+            {sig58 && (
               <div style={{ marginTop: 8, fontSize: 12, color: brand.colors.subtext }}>
                 <a
-                  href={`https://solscan.io/tx/${sig}`}
+                  href={`https://solscan.io/tx/${sig58}`}
                   target="_blank"
                   rel="noreferrer"
                   style={{ color: brand.colors.primary }}
