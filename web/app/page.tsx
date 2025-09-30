@@ -7,7 +7,8 @@ import { WalletMultiButton } from '@solana/wallet-adapter-react-ui';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
 import { VersionedTransaction } from '@solana/web3.js';
 
-/* ----------------------- brand tokens (inline) ----------------------- */
+/* ============================ Brand ============================ */
+
 const brand = {
   colors: {
     bg: '#0B0E12',
@@ -30,7 +31,6 @@ const brand = {
   },
 };
 
-/* ----------------------- tiny inline components ---------------------- */
 function BrandLogo({ size = 56 }: { size?: number }) {
   return (
     <div style={{ display: 'inline-flex', alignItems: 'center', gap: 12 }}>
@@ -58,10 +58,10 @@ function BrandLogo({ size = 56 }: { size?: number }) {
 
 function StatusBanner({
   kind,
-  message,
+  children,
 }: {
   kind: 'idle' | 'loading' | 'success' | 'warn' | 'error';
-  message: string;
+  children: React.ReactNode;
 }) {
   const color =
     kind === 'success'
@@ -81,36 +81,37 @@ function StatusBanner({
         background: brand.colors.panel,
         color,
         fontSize: 14,
+        wordBreak: 'break-word',
       }}
     >
-      {message}
+      {children}
     </div>
   );
 }
 
-/* ----------------------- constants & types --------------------------- */
+/* ============================ Types ============================ */
 
 const IN_SOL = 'So11111111111111111111111111111111111111112';
 const OUT_USDC = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const USDC_DECIMALS = 6;
 
 type QuoteResp = {
-  outAmount?: string; // integer string (smallest units)
+  outAmount?: string;
   routePlan?: Array<{ swapInfo?: { label?: string } }>;
   message?: string;
 };
 
 type BuildTxResp = {
-  tx?: string;
-  transaction?: string;
-  swapTransaction?: string;
-  signedTransaction?: string;
+  /** Jupiter commonly returns one or more of these. We will IGNORE any *signed* variant. */
+  tx?: string; // base64 unsigned
+  transaction?: string; // base64 unsigned
+  swapTransaction?: string; // base64 unsigned (preferred)
+  signedTransaction?: string; // base64 signed (we do not use)
   message?: string;
 };
 
-/* ----------------------- utils -------------------------------------- */
+/* ============================ Helpers ============================ */
 
-// browser-safe base64 -> Uint8Array
 function b64ToBytes(b64: string): Uint8Array {
   const bin = atob(b64.trim());
   const out = new Uint8Array(bin.length);
@@ -118,17 +119,21 @@ function b64ToBytes(b64: string): Uint8Array {
   return out;
 }
 
-// best-effort JSON parse that preserves server text errors
 async function parseJsonSafe(res: Response): Promise<any> {
   const text = await res.text();
   try {
     return JSON.parse(text);
   } catch {
-    return { message: text };
+    return { message: text || `HTTP ${res.status}` };
   }
 }
 
-/* ----------------------- page --------------------------------------- */
+function pickUnsignedTx(j: BuildTxResp): string | null {
+  // Prefer the canonical unsigned field names; explicitly ignore `signedTransaction`.
+  return j.swapTransaction || j.tx || j.transaction || null;
+}
+
+/* ============================ Page ============================ */
 
 export default function Page() {
   const apiBase =
@@ -137,27 +142,37 @@ export default function Page() {
 
   const [amountLamports, setAmountLamports] = useState('1000000'); // 0.001 SOL
   const [slipBps, setSlipBps] = useState('50');
-  const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
-  const [res, setRes] = useState<QuoteResp | null>(null);
 
-  const [txStatus, setTxStatus] = useState<'idle' | 'building' | 'sending' | 'ok' | 'fail'>('idle');
+  const [quoteStatus, setQuoteStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [quote, setQuote] = useState<QuoteResp | null>(null);
+
+  const [txPhase, setTxPhase] = useState<'idle' | 'building' | 'sending' | 'confirming' | 'ok' | 'fail'>('idle');
+  const [txMsg, setTxMsg] = useState<string>('');
   const [sig, setSig] = useState<string | null>(null);
 
   const { connection } = useConnection();
   const { publicKey, connected, sendTransaction } = useWallet();
 
-  const routeLabels = useMemo(() => {
-    if (!res?.routePlan) return [];
-    return res.routePlan.map((r) => r?.swapInfo?.label).filter(Boolean) as string[];
-  }, [res]);
-
   const validInputs =
     /^\d+$/.test(amountLamports) && Number(amountLamports) > 0 && /^\d+$/.test(slipBps);
 
+  const routeLabels = useMemo(() => {
+    if (!quote?.routePlan) return [];
+    return quote.routePlan.map((r) => r?.swapInfo?.label).filter(Boolean) as string[];
+  }, [quote]);
+
+  const formattedOut = useMemo(() => {
+    if (!quote?.outAmount) return null;
+    const v = Number(quote.outAmount) / 10 ** USDC_DECIMALS;
+    if (!Number.isFinite(v)) return null;
+    return v.toLocaleString(undefined, { maximumFractionDigits: USDC_DECIMALS });
+  }, [quote?.outAmount]);
+
+  /* -------------------- Quote -------------------- */
   const onQuote = async () => {
     try {
-      setStatus('loading');
-      setRes(null);
+      setQuoteStatus('loading');
+      setQuote(null);
 
       const url = new URL('/order', apiBase);
       url.searchParams.set('inputMint', IN_SOL);
@@ -168,29 +183,36 @@ export default function Page() {
       const r = await fetch(url.toString(), { headers: { accept: 'application/json' } });
       const j = (await parseJsonSafe(r)) as QuoteResp;
 
-      if (!r.ok) throw new Error(j?.message || `HTTP ${r.status}`);
+      if (!r.ok) throw new Error(j?.message || `Quote failed (HTTP ${r.status})`);
 
-      setRes(j);
-      setStatus('success');
+      setQuote(j);
+      setQuoteStatus('success');
     } catch (e: any) {
-      setStatus('error');
-      setRes({ message: e?.message || 'Unknown error' });
+      setQuote({ message: e?.message || 'Quote error' });
+      setQuoteStatus('error');
     }
   };
 
+  /* -------------------- Build & Sign -------------------- */
   const onBuildAndSign = async () => {
+    setTxPhase('idle');
+    setTxMsg('');
+    setSig(null);
+
     try {
       if (!connected || !publicKey) {
-        alert('Please connect a wallet first.');
+        setTxPhase('fail');
+        setTxMsg('Connect a wallet first.');
         return;
       }
       if (!validInputs) {
-        alert('Please enter a valid lamports amount and slippage.');
+        setTxPhase('fail');
+        setTxMsg('Enter a valid lamports amount and slippage.');
         return;
       }
 
-      setTxStatus('building');
-      setSig(null);
+      setTxPhase('building');
+      setTxMsg('Building transaction via API…');
 
       const url = new URL('/order', apiBase);
       url.searchParams.set('inputMint', IN_SOL);
@@ -203,23 +225,34 @@ export default function Page() {
       const r = await fetch(url.toString(), { headers: { accept: 'application/json' } });
       const j = (await parseJsonSafe(r)) as BuildTxResp;
 
-      if (!r.ok) throw new Error(j?.message || `HTTP ${r.status}`);
+      if (!r.ok) throw new Error(j?.message || `Build failed (HTTP ${r.status})`);
 
-      const txB64 =
-        j.tx || j.swapTransaction || j.transaction || j.signedTransaction || '';
-      if (!txB64) throw new Error('Missing transaction in API response');
+      // **IMPORTANT**: Only accept UNSIGNED tx from the API.
+      const txB64 = pickUnsignedTx(j);
+      if (!txB64) {
+        // If server ever returns only signed, refuse it to avoid mobile wallet errors
+        throw new Error(
+          'API returned a pre-signed transaction; a wallet must sign & send. (unsigned tx not found)'
+        );
+      }
 
+      // Deserialize the unsigned transaction for the adapter to sign+send
       const raw = b64ToBytes(txB64);
       const tx = VersionedTransaction.deserialize(raw);
 
-      setTxStatus('sending');
+      setTxPhase('sending');
+      setTxMsg('Requesting wallet signature…');
 
-      // send via wallet adapter
+      // Adapter handles base58 signature encoding for us
       const signature = await sendTransaction(tx, connection, {
         skipPreflight: false,
         maxRetries: 3,
       });
 
+      setTxPhase('confirming');
+      setTxMsg('Awaiting confirmation…');
+
+      // Confirm with latest blockhash (v1 wallets are ok with this)
       const latest = await connection.getLatestBlockhash();
       await connection.confirmTransaction(
         {
@@ -231,21 +264,27 @@ export default function Page() {
       );
 
       setSig(signature);
-      setTxStatus('ok');
+      setTxPhase('ok');
+      setTxMsg('Sent ✓');
     } catch (e: any) {
-      console.error('build/sign error', e);
-      setTxStatus('fail');
-      alert(e?.message || 'Transaction failed');
+      // Normalize a few common wallet/server messages to something friendly
+      const m = String(e?.message || e || 'Transaction failed');
+      let friendly = m;
+
+      if (/invalid signature format/i.test(m) || /must be base58/i.test(m)) {
+        friendly =
+          'Wallet returned an invalid signature format. This usually means the API returned a pre-signed transaction. We only accept unsigned tx for the wallet to sign.';
+      } else if (/user rejected|user denied|rejected/i.test(m)) {
+        friendly = 'You rejected the request in your wallet.';
+      }
+
+      setTxPhase('fail');
+      setTxMsg(friendly);
+      console.error('[build&sign]', e);
     }
   };
 
-  const formattedOut = useMemo(() => {
-    if (!res?.outAmount) return null;
-    const v = Number(res.outAmount) / 10 ** USDC_DECIMALS;
-    if (!Number.isFinite(v)) return null;
-    return v.toLocaleString(undefined, { maximumFractionDigits: USDC_DECIMALS });
-  }, [res?.outAmount]);
-
+  /* -------------------- Render -------------------- */
   return (
     <main
       style={{
@@ -285,8 +324,8 @@ export default function Page() {
         </header>
 
         <p style={{ color: brand.colors.subtext, marginBottom: 18 }}>
-          Non-custodial swaps on Solana via Jupiter v6. This mini-app calls your proxy API to
-          fetch quotes and can build a transaction for your wallet to sign.
+          Non-custodial swaps on Solana via Jupiter v6. This mini-app calls your proxy API to fetch
+          quotes and can build a transaction for your wallet to sign.
         </p>
 
         <section
@@ -357,32 +396,38 @@ export default function Page() {
         <div style={{ display: 'flex', gap: 12, marginBottom: 14 }}>
           <button
             onClick={onQuote}
-            disabled={status === 'loading' || !validInputs}
+            disabled={quoteStatus === 'loading' || !validInputs}
             style={{
               padding: '12px 16px',
               borderRadius: brand.radii.md,
               background:
-                status === 'loading' || !validInputs
+                quoteStatus === 'loading' || !validInputs
                   ? brand.colors.primaryAlt
                   : brand.colors.primary,
               color: '#0B0E12',
               fontWeight: 800,
               border: 'none',
-              cursor: status === 'loading' || !validInputs ? 'not-allowed' : 'pointer',
+              cursor: quoteStatus === 'loading' || !validInputs ? 'not-allowed' : 'pointer',
             }}
             title={!validInputs ? 'Enter a valid lamports amount & slippage' : 'Get a quote'}
           >
-            {status === 'loading' ? 'Fetching Quote…' : 'Get Quote'}
+            {quoteStatus === 'loading' ? 'Fetching Quote…' : 'Get Quote'}
           </button>
 
           <button
             onClick={onBuildAndSign}
-            disabled={!connected || !validInputs || txStatus === 'building' || txStatus === 'sending'}
+            disabled={
+              !connected || !validInputs || txPhase === 'building' || txPhase === 'sending' || txPhase === 'confirming'
+            }
             style={{
               padding: '12px 16px',
               borderRadius: brand.radii.md,
               background:
-                !connected || !validInputs || txStatus === 'building' || txStatus === 'sending'
+                !connected ||
+                !validInputs ||
+                txPhase === 'building' ||
+                txPhase === 'sending' ||
+                txPhase === 'confirming'
                   ? brand.colors.primaryAlt
                   : brand.colors.accent,
               color: '#0B0E12',
@@ -398,10 +443,12 @@ export default function Page() {
                 : 'Build and sign the swap'
             }
           >
-            {txStatus === 'building'
+            {txPhase === 'building'
               ? 'Building…'
-              : txStatus === 'sending'
-              ? 'Sending…'
+              : txPhase === 'sending'
+              ? 'Signing…'
+              : txPhase === 'confirming'
+              ? 'Confirming…'
               : 'Build & Sign'}
           </button>
         </div>
@@ -409,27 +456,26 @@ export default function Page() {
         <div style={{ marginBottom: 14 }}>
           <StatusBanner
             kind={
-              status === 'error'
+              quoteStatus === 'error'
                 ? 'error'
-                : status === 'success'
+                : quoteStatus === 'success'
                 ? 'success'
-                : status === 'loading'
+                : quoteStatus === 'loading'
                 ? 'loading'
                 : 'idle'
             }
-            message={
-              status === 'error'
-                ? res?.message || 'Something went wrong'
-                : status === 'success'
-                ? 'Quote ready'
-                : status === 'loading'
-                ? 'Talking to Jupiter…'
-                : 'Idle'
-            }
-          />
+          >
+            {quoteStatus === 'error'
+              ? quote?.message || 'Something went wrong'
+              : quoteStatus === 'success'
+              ? 'Quote ready'
+              : quoteStatus === 'loading'
+              ? 'Talking to Jupiter…'
+              : 'Idle'}
+          </StatusBanner>
         </div>
 
-        {res && (
+        {quote && (
           <section
             style={{
               display: 'grid',
@@ -481,20 +527,16 @@ export default function Page() {
           </section>
         )}
 
-        {txStatus !== 'idle' && (
+        {txPhase !== 'idle' && (
           <div style={{ marginTop: 12 }}>
             <StatusBanner
-              kind={txStatus === 'ok' ? 'success' : txStatus === 'fail' ? 'error' : 'loading'}
-              message={
-                txStatus === 'ok'
-                  ? `Sent ✓ ${sig}`
-                  : txStatus === 'fail'
-                  ? 'Transaction failed'
-                  : txStatus === 'sending'
-                  ? 'Awaiting confirmation…'
-                  : 'Building transaction…'
+              kind={
+                txPhase === 'ok' ? 'success' : txPhase === 'fail' ? 'error' : 'loading'
               }
-            />
+            >
+              {txMsg}
+            </StatusBanner>
+
             {sig && (
               <div style={{ marginTop: 8, fontSize: 12, color: brand.colors.subtext }}>
                 <a
