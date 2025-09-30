@@ -6,6 +6,7 @@ import { useMemo, useState } from 'react';
 import { WalletMultiButton } from '@solana/wallet-adapter-react-ui';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
 import { VersionedTransaction } from '@solana/web3.js';
+import bs58 from 'bs58';
 
 /* ============================ Brand ============================ */
 
@@ -102,16 +103,17 @@ type QuoteResp = {
 };
 
 type BuildTxResp = {
-  /** Jupiter returns *unsigned* tx in one of these fields. Ignore signed variants. */
-  tx?: string;                 // base64 unsigned
-  transaction?: string;        // base64 unsigned
-  swapTransaction?: string;    // base64 unsigned (common)
-  signedTransaction?: string;  // base64 signed (unused)
+  /** Jupiter returns one or more of these; we use the *unsigned* variant */
+  tx?: string;
+  transaction?: string;
+  swapTransaction?: string; // preferred unsigned
+  signedTransaction?: string; // ignore if present
   message?: string;
 };
 
 /* ============================ Helpers ============================ */
 
+// base64 → Uint8Array (browser-safe)
 function b64ToBytes(b64: string): Uint8Array {
   const bin = atob(b64.trim());
   const out = new Uint8Array(bin.length);
@@ -119,6 +121,7 @@ function b64ToBytes(b64: string): Uint8Array {
   return out;
 }
 
+// best-effort JSON parse that keeps raw text if not JSON
 async function parseJsonSafe(res: Response): Promise<any> {
   const text = await res.text();
   try {
@@ -126,6 +129,29 @@ async function parseJsonSafe(res: Response): Promise<any> {
   } catch {
     return { message: text };
   }
+}
+
+/** Normalize whatever a wallet returns into a base58 signature string. */
+function normalizeSignature(sig: unknown): string | null {
+  // strings (base58 or hex-like); accept & let confirmTransaction validate
+  if (typeof sig === 'string') return sig;
+
+  // objects like { signature: <bytes> }
+  if (sig && typeof sig === 'object' && 'signature' in (sig as any)) {
+    return normalizeSignature((sig as any).signature);
+  }
+
+  // bytes shapes
+  const toBytes = (x: any): Uint8Array | null => {
+    if (x instanceof Uint8Array) return x;
+    if (Array.isArray(x)) return Uint8Array.from(x);
+    if (x && typeof x === 'object' && 'data' in x && Array.isArray((x as any).data)) {
+      return Uint8Array.from((x as any).data);
+    }
+    return null;
+  };
+  const bytes = toBytes(sig as any);
+  return bytes ? bs58.encode(bytes) : null;
 }
 
 /* ============================ Page ============================ */
@@ -137,30 +163,27 @@ export default function Page() {
 
   const [amountLamports, setAmountLamports] = useState('1000000'); // 0.001 SOL
   const [slipBps, setSlipBps] = useState('50');
-
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
-  const [quote, setQuote] = useState<QuoteResp | null>(null);
+  const [res, setRes] = useState<QuoteResp | null>(null);
 
   const [txStatus, setTxStatus] = useState<'idle' | 'building' | 'sending' | 'ok' | 'fail'>('idle');
   const [sig, setSig] = useState<string | null>(null);
-  const [uiErr, setUiErr] = useState<string | null>(null);
 
   const { connection } = useConnection();
   const { publicKey, connected, sendTransaction } = useWallet();
 
   const routeLabels = useMemo(() => {
-    if (!quote?.routePlan) return [];
-    return quote.routePlan.map((r) => r?.swapInfo?.label).filter(Boolean) as string[];
-  }, [quote]);
+    if (!res?.routePlan) return [];
+    return res.routePlan.map((r) => r?.swapInfo?.label).filter(Boolean) as string[];
+  }, [res]);
 
   const validInputs =
     /^\d+$/.test(amountLamports) && Number(amountLamports) > 0 && /^\d+$/.test(slipBps);
 
-  async function onQuote() {
+  const onQuote = async () => {
     try {
       setStatus('loading');
-      setQuote(null);
-      setUiErr(null);
+      setRes(null);
 
       const url = new URL('/order', apiBase);
       url.searchParams.set('inputMint', IN_SOL);
@@ -173,29 +196,27 @@ export default function Page() {
 
       if (!r.ok) throw new Error(j?.message || `HTTP ${r.status}`);
 
-      setQuote(j);
+      setRes(j);
       setStatus('success');
     } catch (e: any) {
       setStatus('error');
-      setUiErr(e?.message || 'Failed to fetch quote');
-      setQuote({ message: e?.message || 'Unknown error' });
+      setRes({ message: e?.message || 'Unknown error' });
     }
-  }
+  };
 
-  async function onBuildAndSign() {
+  const onBuildAndSign = async () => {
     try {
       if (!connected || !publicKey) {
-        setUiErr('Please connect a wallet first.');
+        alert('Please connect a wallet first.');
         return;
       }
       if (!validInputs) {
-        setUiErr('Enter a valid lamports amount & slippage.');
+        alert('Please enter a valid lamports amount and slippage.');
         return;
       }
 
       setTxStatus('building');
       setSig(null);
-      setUiErr(null);
 
       const url = new URL('/order', apiBase);
       url.searchParams.set('inputMint', IN_SOL);
@@ -210,22 +231,22 @@ export default function Page() {
 
       if (!r.ok) throw new Error(j?.message || `HTTP ${r.status}`);
 
-      // Pick an *unsigned* transaction
       const txB64 = j.swapTransaction || j.tx || j.transaction || '';
-      if (!txB64) throw new Error('Missing unsigned transaction in API response');
+      if (!txB64) throw new Error('Missing transaction in API response');
 
       const raw = b64ToBytes(txB64);
       const tx = VersionedTransaction.deserialize(raw);
 
       setTxStatus('sending');
 
-      // Wallet adapter handles the actual send
-      const signature = await sendTransaction(tx, connection, {
+      // Wallets may return string, bytes, or object—normalize it.
+      const sigRaw = await sendTransaction(tx, connection, {
         skipPreflight: false,
         maxRetries: 3,
       });
+      const signature = normalizeSignature(sigRaw);
+      if (!signature) throw new Error('Could not normalize wallet signature');
 
-      // Confirm with a *fresh* blockhash to avoid "stale blockhash" races
       const latest = await connection.getLatestBlockhash();
       await connection.confirmTransaction(
         {
@@ -233,7 +254,7 @@ export default function Page() {
           blockhash: latest.blockhash,
           lastValidBlockHeight: latest.lastValidBlockHeight,
         },
-        'confirmed'
+        'confirmed',
       );
 
       setSig(signature);
@@ -241,27 +262,21 @@ export default function Page() {
     } catch (e: any) {
       console.error('build/sign error', e);
       setTxStatus('fail');
-      // normalize a few common wallet error strings
-      const msg: string =
-        e?.message?.toString?.() ||
-        e?.toString?.() ||
-        'Transaction failed';
-      setUiErr(
-        /user rejected/i.test(msg)
-          ? 'Transaction rejected by wallet.'
-          : /invalid signature|base58/i.test(msg)
-          ? 'Wallet returned an invalid signature format.'
-          : msg
-      );
+      // Show a concise message the user understands
+      const msg =
+        e?.message?.includes('normalize wallet signature')
+          ? 'Wallet returned an unexpected signature shape.'
+          : e?.message || 'Transaction failed';
+      alert(msg);
     }
-  }
+  };
 
   const formattedOut = useMemo(() => {
-    if (!quote?.outAmount) return null;
-    const v = Number(quote.outAmount) / 10 ** USDC_DECIMALS;
+    if (!res?.outAmount) return null;
+    const v = Number(res.outAmount) / 10 ** USDC_DECIMALS;
     if (!Number.isFinite(v)) return null;
     return v.toLocaleString(undefined, { maximumFractionDigits: USDC_DECIMALS });
-  }, [quote?.outAmount]);
+  }, [res?.outAmount]);
 
   return (
     <main
@@ -436,7 +451,7 @@ export default function Page() {
             }
           >
             {status === 'error'
-              ? quote?.message || 'Something went wrong'
+              ? res?.message || 'Something went wrong'
               : status === 'success'
               ? 'Quote ready'
               : status === 'loading'
@@ -445,7 +460,7 @@ export default function Page() {
           </StatusBanner>
         </div>
 
-        {quote && (
+        {res && (
           <section
             style={{
               display: 'grid',
@@ -505,12 +520,11 @@ export default function Page() {
               {txStatus === 'ok'
                 ? `Sent ✓ ${sig}`
                 : txStatus === 'fail'
-                ? (uiErr || 'Transaction failed')
+                ? 'Transaction failed'
                 : txStatus === 'sending'
                 ? 'Awaiting confirmation…'
                 : 'Building transaction…'}
             </StatusBanner>
-
             {sig && (
               <div style={{ marginTop: 8, fontSize: 12, color: brand.colors.subtext }}>
                 <a
