@@ -18,8 +18,8 @@ export default function Providers({ children }: { children: ReactNode }) {
   const wallets = useMemo(
     () => [
       new PhantomWalletAdapter(),
-      new SolflareWalletAdapter({ network: WalletAdapterNetwork.Mainnet }), // ← enum, not string
-      new BackpackWalletAdapter(), // remove if you don’t want Backpack
+      new SolflareWalletAdapter({ network: WalletAdapterNetwork.Mainnet }),
+      new BackpackWalletAdapter(),
     ],
     [],
   );
