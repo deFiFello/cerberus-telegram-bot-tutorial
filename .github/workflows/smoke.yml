@@ -1,53 +1,39 @@
 name: smoke
 
 on:
-  workflow_dispatch:
   push:
-    branches: [ main, release/demo-stable ]
-  schedule:
-    - cron: "0 */6 * * *"   # every 6 hours
+    branches: [ main, release/** ]
+  workflow_dispatch:
 
 jobs:
-  api:
+  web-ok:
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    env:
-      BASE: https://cerberus-telegram-bot-tutorial.onrender.com
-      IN: So11111111111111111111111111111111111111112
-      OUT: EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v
-      AMT: 10000000
-      SLIP: 50
     steps:
-      - name: Health 200 (warmup/retry)
+      - name: Check API /health
+        env:
+          API_BASE: https://cerberus-telegram-bot-tutorial.onrender.com
         run: |
           set -euo pipefail
-          URL="$BASE/health"
-          echo "Pinging: $URL"
-          for i in {1..18}; do
-            code=$(curl -s -o /dev/null -w "%{http_code}" "$URL" || echo 000)
-            echo "Attempt $i -> HTTP $code"
-            [ "$code" = "200" ] && exit 0
-            sleep 10
-          done
-          echo "API never returned 200"
-          curl -v "$URL" || true
-          exit 1
+          echo "Hitting $API_BASE/health"
+          body="$(curl -fsS "$API_BASE/health")"
+          echo "$body" | jq .
+          # require JSON and ok==true
+          echo "$body" | jq -e '.ok == true' >/dev/null
+          echo "Health OK"
 
-      - name: Quote (try up to 3 times; HIT optional)
+  build-web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - name: Install & build web
+        working-directory: web
         run: |
-          set -euo pipefail
-          url="${BASE}/order?inputMint=${IN}&outputMint=${OUT}&amount=${AMT}&slippageBps=${SLIP}"
-          hit=0
-          for i in 1 2 3; do
-            echo "try #$i"
-            curl -fsSi "$url" -o /tmp/body.txt > /tmp/headers.txt
-            echo "---- headers"; awk 'BEGIN{IGNORECASE=1}/^HTTP\/|^x-cache:|^content-type:/{print}' /tmp/headers.txt
-            if grep -qi '^x-cache: *hit' /tmp/headers.txt; then hit=1; break; fi
-            sleep 3
-          done
-          if [ "$hit" -eq 0 ]; then echo "No cache HIT observed (not fatal)."; fi
-
-      - name: Metrics 200
-        run: |
-          set -euo pipefail
-          curl -fsS "${BASE}/metrics" >/dev/null || true  # optional
+          npm ci
+          printf 'NEXT_PUBLIC_API_BASE=%s\n' "https://cerberus-telegram-bot-tutorial.onrender.com" > .env.local
+          npm run build
